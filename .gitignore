@@ -11,3 +11,4 @@ wheels/
 .env
 *.pdf
 *.txt
+*.jsonl

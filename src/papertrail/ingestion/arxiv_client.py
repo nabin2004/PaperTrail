@@ -57,4 +57,4 @@ if __name__ == "__main__":
     client = ArxivClient(categories=["cs.AI", "cs.LG", "cs.CL", "cs.CV"], max_results=5)
     papers = client.fetch_papers()
     for p in papers:
-        print(p.title, "-", p.arxiv_id)
+        print(p.title, "-", p.arxiv_id, "-", p.authors, "-", p.abstract)
