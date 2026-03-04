@@ -191,9 +191,13 @@ pip install -e ".[dev]"
 
 ## Roadmap
 
-- [ ] Streaming synthesis output
-- [ ] Multi-modal support (figures, tables)
-- [ ] Export to Obsidian / Notion
-- [ ] Web UI (FastAPI + React)
-- [ ] Scheduled paper ingestion (cron)
-- [ ] Cross-encoder reranker upgrade
+Skeleton implementations and documentation are available for these planned features:
+
+| Feature | Status | Docs | Code |
+|---|---|---|---|
+| Streaming synthesis output | 🔲 Skeleton | [streaming.md](docs/features/streaming.md) | [chains/streaming.py](src/papertrail/chains/streaming.py) |
+| Multi-modal support (figures, tables) | 🔲 Skeleton | [multimodal.md](docs/features/multimodal.md) | [processing/multimodal.py](src/papertrail/processing/multimodal.py) |
+| Export to Obsidian / Notion | 🔲 Skeleton | [export.md](docs/features/export.md) | [export/](src/papertrail/export/) |
+| Web UI (FastAPI + React) | 🔲 Skeleton | [web-ui.md](docs/features/web-ui.md) | [api/main.py](src/papertrail/api/main.py) |
+| Scheduled paper ingestion | 🔲 Skeleton | [scheduler.md](docs/features/scheduler.md) | [scheduler/jobs.py](src/papertrail/scheduler/jobs.py) |
+| Cross-encoder reranker | 🔲 Skeleton | [cross-encoder.md](docs/features/cross-encoder.md) | [retrieval/reranker.py](src/papertrail/retrieval/reranker.py) |
