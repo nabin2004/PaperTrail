@@ -33,7 +33,7 @@ console = Console()
 @click.group()
 @click.version_option("0.1.0", prog_name="papertrail")
 def cli() -> None:
-    """PaperTrail – AI-powered research paper discovery and synthesis."""
+    """PaperTrail: AI-powered research paper discovery and synthesis."""
     _load_dotenv()
 
 
@@ -62,7 +62,7 @@ def ingest(categories: str, max_results: int, no_clean: bool) -> None:
     cats = [c.strip() for c in categories.split(",") if c.strip()]
     console.print(Panel(
         f"Fetching up to [bold]{max_results}[/bold] papers from {', '.join(cats)}",
-        title="[green]PaperTrail – Ingest[/green]"
+        title="[green]PaperTrail – Ingest[/green]",
     ))
 
     client = ArxivClient(categories=cats, max_results=max_results)
@@ -312,6 +312,46 @@ def trends(top_n: int) -> None:
     console.print(kw_table)
     console.print(cat_table)
 
+# papertrail digest papertrail summarize papertrail related papertrail gaps
+
+@cli.command()
+@click.option("digest", "--digest", is_flag=True, default=False, help="Generate a digest of recent papers.")
+def digest(digest: bool) -> None:
+    """Generate a digest of recent papers."""
+    from papertrail.agents.research_agent import ResearchAgent
+
+    agent = ResearchAgent()
+    if not agent.is_ready():
+        console.print("[red]No papers indexed yet. Run [bold]papertrail ingest[/bold] first.[/red]")
+        sys.exit(1)
+
+    with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as prog:
+        t = prog.add_task("Generating digest…", total=None)
+        summary = agent.generate_digest()
+        prog.update(t, description="Done.")
+
+    console.print(Panel(Markdown(summary), title="[green]Digest[/green]", expand=False))
+
+@cli.command()
+@click.option("summarize", "--summarize", is_flag=True, default=False, help="Generate a summary of recent papers.")
+def summarize(summarize: bool) -> None:
+    """Generate a summary of recent papers."""
+    # Implementation for summarize command
+    pass
+
+@cli.command()
+@click.option("related", "--related", is_flag=True, default=False, help="Find related papers based on indexed content.")
+def related(related: bool) -> None:
+    """Find related papers based on indexed content."""
+    # Implementation for related command
+    pass
+
+@cli.command()
+@click.option("gaps", "--gaps", is_flag=True, default=False, help="Identify gaps in the research based on indexed papers.")
+def gaps(gaps: bool) -> None:   
+    """Identify gaps in the research based on indexed papers."""
+    # Implementation for gaps command
+    pass
 
 # ──────────────────────────────────────────────────────────────
 # reset
