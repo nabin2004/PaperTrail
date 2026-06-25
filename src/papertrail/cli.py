@@ -23,6 +23,7 @@ console = Console()
 COMMAND_GROUPS = {
     "Index & Data": ["ingest", "list", "trends", "reset"],
     "Search & Analysis": ["search", "ask", "report", "digest"],
+    "Scientist Tools": ["plan", "hypothesis", "tree", "experiment"],
 }
 
 
@@ -318,7 +319,8 @@ def trends(top_n):
 
 
 @cli.command()
-def digest():
+@click.option("--top-n", default=10, show_default=True, help="Number of recent papers to include in the digest.")
+def digest(top_n):
     """Generate a digest of recent papers."""
     from papertrail.agents.research_agent import ResearchAgent
 
@@ -326,7 +328,7 @@ def digest():
     need_index(agent)
 
     with Progress(SpinnerColumn(), TextColumn("Generating digest..."), console=console, transient=True):
-        summary = agent.generate_digest()
+        summary = agent.generate_digest(k=top_n)
 
     console.print(Panel(Markdown(summary), title="Digest", border_style="blue", expand=False))
 
@@ -355,6 +357,28 @@ def reset(yes):
             msg += f"\nCleared {d}"
 
     console.print(Panel(msg, title="Reset", border_style="blue"))
+
+
+@cli.command()
+def plan():
+    """AI Scientist planning."""
+    pass
+
+@cli.command()
+def hypothesis():
+    """AI Scientist hypothesis generation."""
+    pass
+
+@cli.command()
+def tree():
+    """AI Scientist tree generation."""
+    pass
+
+@cli.command()
+def experiment():
+    """AI Scientist experiment design."""
+    pass
+
 
 
 def _load_dotenv():
