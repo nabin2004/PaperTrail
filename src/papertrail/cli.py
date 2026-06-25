@@ -1,18 +1,4 @@
-"""
-PaperTrail CLI – powered by Click + Rich.
-
-Commands
---------
-  ingest   Fetch papers from arXiv, download PDFs, embed + index
-  search   Semantic search over indexed papers
-  ask      RAG-based Q&A against indexed papers
-  report   Full research report (plan → retrieve → synthesise → critique)
-  list     List all indexed papers
-  trends   Show trending keywords and categories
-  reset    Wipe the FAISS index and all stored data
-"""
-from __future__ import annotations
-
+"""PaperTrail CLI – powered by Click + Rich."""
 import sys
 from pathlib import Path
 
@@ -23,23 +9,49 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+## Makes cli command faster in windows by avoiding encoding issues with stdout/stderr
+if sys.platform == "win32":
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, OSError):
+            pass
+
 console = Console()
 
+# add newer commands here to groupp them in the help output
+COMMAND_GROUPS = {
+    "Index & Data": ["ingest", "list", "trends", "reset"],
+    "Search & Analysis": ["search", "ask", "report", "digest"],
+}
 
-# ──────────────────────────────────────────────────────────────
-# CLI group
-# ──────────────────────────────────────────────────────────────
 
-@click.group()
+class PaperTrailGroup(click.Group):
+    def format_help(self, ctx, formatter):
+        console.print(Panel(self.help, title="PaperTrail", border_style="blue"))
+        for group, names in COMMAND_GROUPS.items():
+            rows = []
+            for name in names:
+                cmd = self.get_command(ctx, name)
+                if cmd:
+                    rows.append(f"  {name:<12}  {cmd.get_short_help_str()}")
+            if rows:
+                console.print(Panel("\n".join(rows), title=group, border_style="blue"))
+
+
+@click.group(cls=PaperTrailGroup)
 @click.version_option("0.1.0", prog_name="papertrail")
-def cli() -> None:
-    """PaperTrail: AI-powered research paper discovery and synthesis."""
+def cli():
+    """AI-powered research paper discovery and synthesis."""
     _load_dotenv()
 
 
-# ──────────────────────────────────────────────────────────────
-# ingest
-# ──────────────────────────────────────────────────────────────
+def need_index(obj):
+    empty = obj.is_empty() if hasattr(obj, "is_empty") else not obj.is_ready()
+    if empty:
+        console.print("[red]No papers yet - run: papertrail ingest[/red]")
+        sys.exit(1)
+
 
 @cli.command()
 @click.option("--categories", "-c", default="cs.AI,cs.LG,cs.CL", show_default=True,
@@ -48,98 +60,90 @@ def cli() -> None:
               help="Maximum number of papers to fetch.")
 @click.option("--no-clean", is_flag=True, default=False,
               help="Skip text cleaning step.")
-def ingest(categories: str, max_results: int, no_clean: bool) -> None:
-    """Fetch arXiv papers, download PDFs, process and index them."""
+def ingest(categories, max_results, no_clean):
+    """Fetch arXiv papers, download PDFs, and index them."""
     from papertrail.ingestion.arxiv_client import ArxivClient
-    from papertrail.ingestion.metadata import metadata_exists, save_metadata
-    from papertrail.ingestion.pdf_loader import download_pdf, extract_text, save_processed_text
-    from papertrail.processing.cleaners import clean_text
+    from papertrail.ingestion.metadata import save_metadata
+    from papertrail.ingestion.pdf_loader import download_pdf, save_processed_text
     from papertrail.processing.embeddings import embed_texts
     from papertrail.processing.splitters import split_and_save
     from papertrail.retrieval.vectorstore import VectorStore
-    import json
 
     cats = [c.strip() for c in categories.split(",") if c.strip()]
     console.print(Panel(
-        f"Fetching up to [bold]{max_results}[/bold] papers from {', '.join(cats)}",
-        title="[green]PaperTrail – Ingest[/green]",
+        f"Fetching up to {max_results} papers from {', '.join(cats)}",
+        title="Ingest",
+        border_style="blue",
     ))
 
     client = ArxivClient(categories=cats, max_results=max_results)
-
-    with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as prog:
-        t = prog.add_task("Fetching paper list from arXiv…", total=None)
-        papers = client.fetch_papers()
-        prog.update(t, description=f"Found [bold]{len(papers)}[/bold] papers.")
+    console.print("Fetching paper list from arXiv...")
+    papers = client.fetch_papers()
+    console.print(f"Found {len(papers)} papers.")
 
     store = VectorStore()
     new_count = 0
 
     for i, paper in enumerate(papers, 1):
-        console.print(f"[{i}/{len(papers)}] [cyan]{paper.title[:80]}[/cyan]")
+        console.print(f"[{i}/{len(papers)}] {paper.title[:80]}")
 
-        # Skip already-indexed papers
         if paper.arxiv_id in store.indexed_paper_ids():
-            console.print("  [dim]already indexed – skipping[/dim]")
+            console.print("  already indexed, skipping")
             continue
 
         try:
-            with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console, transient=True) as p2:
-                t2 = p2.add_task("  Downloading PDF…", total=None)
-                pdf_path = download_pdf(paper)
-                if pdf_path is None:
-                    console.print("  [red]No PDF URL – skipping[/red]")
-                    continue
+            console.print("  downloading...")
+            pdf_path = download_pdf(paper)
+            if pdf_path is None:
+                console.print("  no PDF, skipping")
+                continue
 
-                p2.update(t2, description="  Extracting text…")
-                text_path = save_processed_text(pdf_path, clean=not no_clean)
+            console.print("  extracting text...")
+            text_path = save_processed_text(pdf_path, clean=not no_clean)
 
-                p2.update(t2, description="  Splitting into chunks…")
-                chunks_path = split_and_save(text_path)
+            console.print("  splitting into chunks...")
+            chunks_path = split_and_save(text_path)
 
-                p2.update(t2, description="  Creating embeddings…")
-                chunk_dicts = _load_chunks(chunks_path)
-                if not chunk_dicts:
-                    continue
-                texts = [c["text"] for c in chunk_dicts]
-                embeddings = embed_texts(texts)
+            console.print("  creating embeddings...")
+            chunk_dicts = _load_chunks(chunks_path)
+            if not chunk_dicts:
+                continue
+            texts = [c["text"] for c in chunk_dicts]
+            embeddings = embed_texts(texts)
 
-                p2.update(t2, description="  Saving to index…")
-                store.add_chunks(embeddings, chunk_dicts)
+            console.print("  saving to index...")
+            store.add_chunks(embeddings, chunk_dicts)
 
-            # Persist metadata
             paper.indexed = True
             save_metadata(paper)
             new_count += 1
-            console.print(f"  [green]✓ indexed {len(chunk_dicts)} chunks[/green]")
+            console.print(f"  done - {len(chunk_dicts)} chunks")
 
         except Exception as exc:
-            console.print(f"  [red]Error: {exc}[/red]")
+            console.print(f"  error: {exc}")
 
-    console.print(f"\n[bold green]Done.[/bold green] Indexed {new_count} new papers. "
-                  f"Total in store: {store.total_chunks} chunks across {len(store.indexed_paper_ids())} papers.")
+    console.print(Panel(
+        f"Done! Indexed {new_count} new papers. "
+        f"Total: {store.total_chunks} chunks, {len(store.indexed_paper_ids())} papers.",
+        title="Ingest",
+        border_style="blue",
+    ))
 
-
-# ──────────────────────────────────────────────────────────────
-# search
-# ──────────────────────────────────────────────────────────────
 
 @cli.command()
 @click.argument("query")
 @click.option("--top-k", "-k", default=5, show_default=True, help="Number of results.")
 @click.option("--rerank/--no-rerank", default=True, show_default=True,
               help="Apply reranking after retrieval.")
-def search(query: str, top_k: int, rerank: bool) -> None:
-    """Semantic search over indexed papers."""
+def search(query, top_k, rerank):
+    """Search indexed papers."""
     from papertrail.retrieval.retrievers import PaperRetriever
     from papertrail.retrieval.reranker import rerank as do_rerank
 
     retriever = PaperRetriever()
-    if retriever.is_empty():
-        console.print("[red]No papers indexed yet. Run [bold]papertrail ingest[/bold] first.[/red]")
-        sys.exit(1)
+    need_index(retriever)
 
-    with Progress(SpinnerColumn(), TextColumn("Searching…"), console=console, transient=True):
+    with Progress(SpinnerColumn(), TextColumn("Searching..."), console=console, transient=True):
         results = retriever.retrieve(query, k=top_k * 3)
         if rerank:
             results = do_rerank(query, results, top_k=top_k)
@@ -147,11 +151,10 @@ def search(query: str, top_k: int, rerank: bool) -> None:
             results = results[:top_k]
 
     if not results:
-        console.print("[yellow]No results found.[/yellow]")
+        console.print(Panel("No results found.", title="Search", border_style="blue"))
         return
 
-    table = Table(title=f"Top {len(results)} results for: [italic]{query}[/italic]",
-                  show_lines=True)
+    table = Table(title=f"Results for: {query}", show_lines=True)
     table.add_column("#", style="dim", width=3)
     table.add_column("Score", width=6)
     table.add_column("Paper", style="cyan")
@@ -159,41 +162,31 @@ def search(query: str, top_k: int, rerank: bool) -> None:
 
     for i, r in enumerate(results, 1):
         title = (r.title or r.paper_id)[:50]
-        authors = (", ".join(r.authors[:2]) + "…") if r.authors else ""
-        caption = f"{title}\n[dim]{authors} {r.published or ''}[/dim]"
-        table.add_row(str(i), f"{r.score:.3f}", caption, r.text[:200] + "…")
+        authors = (", ".join(r.authors[:2]) + "...") if r.authors else ""
+        caption = f"{title}\n{authors} {r.published or ''}"
+        table.add_row(str(i), f"{r.score:.3f}", caption, r.text[:200] + "...")
 
-    console.print(table)
+    console.print(Panel(table, title="Search", border_style="blue"))
 
-
-# ──────────────────────────────────────────────────────────────
-# ask
-# ──────────────────────────────────────────────────────────────
 
 @cli.command()
 @click.argument("question")
 @click.option("--top-k", "-k", default=6, show_default=True,
               help="Number of chunks used for answering.")
-def ask(question: str, top_k: int) -> None:
-    """Ask a question and get a synthesized answer from indexed papers."""
+def ask(question, top_k):
+    """Ask a question about indexed papers."""
     from papertrail.agents.research_agent import ResearchAgent
 
     agent = ResearchAgent(rerank_k=top_k)
-    if not agent.is_ready():
-        console.print("[red]No papers indexed yet. Run [bold]papertrail ingest[/bold] first.[/red]")
-        sys.exit(1)
+    need_index(agent)
 
-    console.print(Panel(f"[bold]{question}[/bold]", title="Question"))
+    console.print(Panel(question, title="Question", border_style="blue"))
 
-    with Progress(SpinnerColumn(), TextColumn("Thinking…"), console=console, transient=True):
+    with Progress(SpinnerColumn(), TextColumn("Thinking..."), console=console, transient=True):
         answer = agent.ask(question)
 
-    console.print(Panel(Markdown(answer), title="[green]Answer[/green]", expand=False))
+    console.print(Panel(Markdown(answer), title="Answer", border_style="blue", expand=False))
 
-
-# ──────────────────────────────────────────────────────────────
-# report
-# ──────────────────────────────────────────────────────────────
 
 @cli.command()
 @click.argument("question")
@@ -201,64 +194,85 @@ def ask(question: str, top_k: int) -> None:
               help="Number of chunks used for synthesis.")
 @click.option("--output", "-o", default=None, type=click.Path(),
               help="Optional path to save the report as Markdown.")
-def report(question: str, top_k: int, output: str | None) -> None:
-    """Generate a full research report: plan → retrieve → synthesise → critique → evaluate."""
+def report(question, top_k, output):
+    """Generate a research report."""
     from papertrail.agents.research_agent import ResearchAgent
 
     agent = ResearchAgent(rerank_k=top_k)
-    if not agent.is_ready():
-        console.print("[red]No papers indexed yet. Run [bold]papertrail ingest[/bold] first.[/red]")
-        sys.exit(1)
+    need_index(agent)
 
-    console.print(Panel(f"[bold]{question}[/bold]", title="[green]Research Question[/green]"))
+    console.print(Panel(question, title="Research Question", border_style="blue"))
 
-    with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as prog:
-        t = prog.add_task("Running research pipeline…", total=None)
+    with Progress(SpinnerColumn(), TextColumn("Running..."), console=console, transient=True):
         rep = agent.research(question)
-        prog.update(t, description="Done.")
 
-    # ── Display ───────────────────────────────────────────────
-    console.rule("[bold green]Research Plan[/bold green]")
     if rep.plan:
-        console.print(f"[bold]Queries:[/bold] {', '.join(rep.plan.queries or [question])}")
-        console.print(f"[bold]Concepts:[/bold] {', '.join(rep.plan.concepts or [])}")
+        console.print(Panel(
+            Markdown(
+                f"**Queries:** {', '.join(rep.plan.queries or [question])}\n\n"
+                f"**Concepts:** {', '.join(rep.plan.concepts or [])}"
+            ),
+            title="Research Plan",
+            border_style="blue",
+        ))
 
-    console.rule("[bold green]Synthesis[/bold green]")
-    console.print(Markdown(rep.synthesis))
+    console.print(Panel(Markdown(rep.synthesis), title="Synthesis", border_style="blue"))
+    console.print(Panel(Markdown(rep.critique), title="Critique", border_style="blue"))
+    console.print(Panel(
+        "\n".join(f"{i}. {s.title or s.paper_id} - score {s.score:.3f}" for i, s in enumerate(rep.sources, 1)),
+        title="Sources",
+        border_style="blue",
+    ))
+    console.print(Panel(
+        f"Faithfulness: {rep.faithfulness_score:.2%}\nCoverage: {rep.coverage_score:.2%}",
+        title="Evaluation",
+        border_style="blue",
+    ))
 
-    console.rule("[bold yellow]Critique[/bold yellow]")
-    console.print(Markdown(rep.critique))
-
-    console.rule("[bold blue]Sources[/bold blue]")
-    for i, src in enumerate(rep.sources, 1):
-        console.print(f"[{i}] [cyan]{src.title or src.paper_id}[/cyan] – score {src.score:.3f}")
-
-    console.rule("[bold]Evaluation[/bold]")
-    console.print(f"Faithfulness : {rep.faithfulness_score:.2%}")
-    console.print(f"Coverage     : {rep.coverage_score:.2%}")
-
-    # ── Save ──────────────────────────────────────────────────
     if output:
-        md = _report_to_markdown(rep)
+        sources_md = "\n".join(
+            f"{i}. **{s.title or s.paper_id}** (score: {s.score:.3f})"
+            for i, s in enumerate(rep.sources, 1)
+        )
+        md = f"""# Research Report
+
+**Question:** {rep.question}
+**Generated:** {rep.created_at.strftime('%Y-%m-%d %H:%M UTC')}
+
+---
+
+## Synthesis
+
+{rep.synthesis}
+
+## Critique
+
+{rep.critique}
+
+## Sources
+
+{sources_md}
+
+## Evaluation
+
+- **Faithfulness:** {rep.faithfulness_score:.2%}
+- **Coverage:** {rep.coverage_score:.2%}
+"""
         Path(output).write_text(md, encoding="utf-8")
-        console.print(f"\n[green]Report saved → {output}[/green]")
+        console.print(Panel(f"Saved to {output}", title="Report", border_style="blue"))
 
-
-# ──────────────────────────────────────────────────────────────
-# list
-# ──────────────────────────────────────────────────────────────
 
 @cli.command(name="list")
-def list_papers() -> None:
-    """List all indexed papers."""
+def list_papers():
+    """List indexed papers."""
     from papertrail.ingestion.metadata import load_all_metadata
 
     papers = load_all_metadata()
     if not papers:
-        console.print("[yellow]No papers indexed yet.[/yellow]")
+        console.print(Panel("No papers indexed yet.", title="Papers", border_style="blue"))
         return
 
-    table = Table(title=f"{len(papers)} Indexed Papers", show_lines=True)
+    table = Table(title=f"{len(papers)} papers", show_lines=True)
     table.add_column("arXiv ID", style="cyan", width=14)
     table.add_column("Title")
     table.add_column("Authors", width=30)
@@ -266,127 +280,84 @@ def list_papers() -> None:
     table.add_column("Category", width=10)
 
     for p in papers:
-        authors = ", ".join(p.authors[:2]) + ("…" if len(p.authors) > 2 else "")
-        table.add_row(
-            p.arxiv_id,
-            p.title[:60],
-            authors,
-            str(p.published.date()),
-            p.primary_category,
-        )
+        authors = ", ".join(p.authors[:2]) + ("..." if len(p.authors) > 2 else "")
+        table.add_row(p.arxiv_id, p.title[:60], authors, str(p.published.date()), p.primary_category)
 
-    console.print(table)
+    console.print(Panel(table, title="Papers", border_style="blue"))
 
-
-# ──────────────────────────────────────────────────────────────
-# trends
-# ──────────────────────────────────────────────────────────────
 
 @cli.command()
 @click.option("--top-n", default=20, show_default=True, help="Number of keywords to show.")
-def trends(top_n: int) -> None:
-    """Show trending keywords and categories from all indexed papers."""
+def trends(top_n):
+    """Show trending keywords and categories."""
     from papertrail.ingestion.metadata import load_all_metadata
     from papertrail.memory.trend_memory import TrendMemory
 
     papers = load_all_metadata()
     if not papers:
-        console.print("[yellow]No papers indexed yet.[/yellow]")
+        console.print(Panel("No papers indexed yet.", title="Trends", border_style="blue"))
         return
 
     mem = TrendMemory()
     mem.update(papers)
 
-    kw_table = Table(title=f"Top {top_n} Keywords", show_lines=False, box=None)
+    kw_table = Table(title=f"Top {top_n} keywords", show_lines=False, box=None)
     kw_table.add_column("Keyword", style="cyan")
     kw_table.add_column("Count", justify="right")
     for kw, cnt in mem.top_keywords(top_n):
         kw_table.add_row(kw, str(cnt))
 
-    cat_table = Table(title="Top Categories", show_lines=False, box=None)
+    cat_table = Table(title="Top categories", show_lines=False, box=None)
     cat_table.add_column("Category", style="green")
     cat_table.add_column("Count", justify="right")
     for cat, cnt in mem.top_categories(10):
         cat_table.add_row(cat, str(cnt))
 
-    console.print(kw_table)
-    console.print(cat_table)
+    console.print(Panel(kw_table, title="Keywords", border_style="blue"))
+    console.print(Panel(cat_table, title="Categories", border_style="blue"))
 
-# papertrail digest papertrail summarize papertrail related papertrail gaps
 
 @cli.command()
-@click.option("digest", "--digest", is_flag=True, default=False, help="Generate a digest of recent papers.")
-def digest(digest: bool) -> None:
+def digest():
     """Generate a digest of recent papers."""
     from papertrail.agents.research_agent import ResearchAgent
 
     agent = ResearchAgent()
-    if not agent.is_ready():
-        console.print("[red]No papers indexed yet. Run [bold]papertrail ingest[/bold] first.[/red]")
-        sys.exit(1)
+    need_index(agent)
 
-    with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as prog:
-        t = prog.add_task("Generating digest…", total=None)
+    with Progress(SpinnerColumn(), TextColumn("Generating digest..."), console=console, transient=True):
         summary = agent.generate_digest()
-        prog.update(t, description="Done.")
 
-    console.print(Panel(Markdown(summary), title="[green]Digest[/green]", expand=False))
+    console.print(Panel(Markdown(summary), title="Digest", border_style="blue", expand=False))
 
-@cli.command()
-@click.option("summarize", "--summarize", is_flag=True, default=False, help="Generate a summary of recent papers.")
-def summarize(summarize: bool) -> None:
-    """Generate a summary of recent papers."""
-    # Implementation for summarize command
-    pass
-
-@cli.command()
-@click.option("related", "--related", is_flag=True, default=False, help="Find related papers based on indexed content.")
-def related(related: bool) -> None:
-    """Find related papers based on indexed content."""
-    # Implementation for related command
-    pass
-
-@cli.command()
-@click.option("gaps", "--gaps", is_flag=True, default=False, help="Identify gaps in the research based on indexed papers.")
-def gaps(gaps: bool) -> None:   
-    """Identify gaps in the research based on indexed papers."""
-    # Implementation for gaps command
-    pass
-
-# ──────────────────────────────────────────────────────────────
-# reset
-# ──────────────────────────────────────────────────────────────
 
 @cli.command()
 @click.option("--yes", is_flag=True, default=False, help="Skip confirmation prompt.")
-def reset(yes: bool) -> None:
-    """Wipe the FAISS index and all stored metadata/chunks."""
+def reset(yes):
+    """Wipe the index and stored data."""
     if not yes:
         click.confirm("This will delete ALL indexed data. Continue?", abort=True)
 
+    import os
+    import shutil
     from papertrail.retrieval.vectorstore import VectorStore
-    import shutil, os
 
     store = VectorStore()
     store.reset()
-    console.print("[green]FAISS index cleared.[/green]")
 
-    _data = Path(os.getenv("DATA_DIR", "data"))
+    data_dir = Path(os.getenv("DATA_DIR", "data"))
+    msg = "FAISS index cleared."
     for subdir in ("metadata", "chunks", "processed"):
-        d = _data / subdir
+        d = data_dir / subdir
         if d.exists():
             shutil.rmtree(d)
             d.mkdir(parents=True, exist_ok=True)
-            console.print(f"[green]Cleared {d}[/green]")
+            msg += f"\nCleared {d}"
 
-    console.print("[bold green]Reset complete.[/bold green]")
+    console.print(Panel(msg, title="Reset", border_style="blue"))
 
 
-# ──────────────────────────────────────────────────────────────
-# Helpers
-# ──────────────────────────────────────────────────────────────
-
-def _load_dotenv() -> None:
+def _load_dotenv():
     try:
         from dotenv import load_dotenv
         load_dotenv()
@@ -394,7 +365,7 @@ def _load_dotenv() -> None:
         pass
 
 
-def _load_chunks(chunks_path: Path) -> list:
+def _load_chunks(chunks_path):
     import json
     chunks = []
     with chunks_path.open(encoding="utf-8") as f:
@@ -403,26 +374,6 @@ def _load_chunks(chunks_path: Path) -> list:
             if line:
                 chunks.append(json.loads(line))
     return chunks
-
-
-def _report_to_markdown(rep) -> str:
-    lines = [
-        f"# Research Report\n",
-        f"**Question:** {rep.question}\n",
-        f"**Generated:** {rep.created_at.strftime('%Y-%m-%d %H:%M UTC')}\n",
-        f"\n---\n",
-        f"## Synthesis\n\n{rep.synthesis}\n",
-        f"\n## Critique\n\n{rep.critique}\n",
-        f"\n## Sources\n",
-    ]
-    for i, src in enumerate(rep.sources, 1):
-        lines.append(f"{i}. **{src.title or src.paper_id}** (score: {src.score:.3f})\n")
-    lines += [
-        f"\n## Evaluation\n",
-        f"- **Faithfulness:** {rep.faithfulness_score:.2%}\n",
-        f"- **Coverage:** {rep.coverage_score:.2%}\n",
-    ]
-    return "".join(lines)
 
 
 if __name__ == "__main__":
