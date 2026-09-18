@@ -15,6 +15,10 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 
 
+import logfire
+from papertrail.utils.observability import extract_model_name
+
+
 @lru_cache(maxsize=4)
 def get_llm(temperature: float = 0.3, model: str | None = None) -> BaseChatModel:
     """Return a configured LangChain LLM instance (cached per temperature+model)."""
@@ -33,6 +37,12 @@ def get_llm(temperature: float = 0.3, model: str | None = None) -> BaseChatModel
         }
         if base_url:
             kwargs["base_url"] = base_url
+        logfire.info(
+            "Configured LangChain LLM {provider} model={model_name} temperature={temperature}",
+            provider="openai_compatible",
+            model_name=chosen,
+            temperature=temperature,
+        )
         return ChatOpenAI(**kwargs)
 
     # ── Try Ollama ────────────────────────────────────────────────────────────
@@ -41,6 +51,12 @@ def get_llm(temperature: float = 0.3, model: str | None = None) -> BaseChatModel
         try:
             from langchain_community.chat_models import ChatOllama  # type: ignore
             chosen = model or os.getenv("OLLAMA_MODEL", "llama3.2")
+            logfire.info(
+                "Configured LangChain LLM {provider} model={model_name} temperature={temperature}",
+                provider="ollama",
+                model_name=chosen,
+                temperature=temperature,
+            )
             return ChatOllama(base_url=ollama_url, model=chosen, temperature=temperature)
         except ImportError:
             pass
@@ -68,6 +84,11 @@ def get_pydantic_ai_model(model: str | None = None):
         from pydantic_ai.models.openai import OpenAIChatModel
         from pydantic_ai.providers.openai import OpenAIProvider
         provider = OpenAIProvider(api_key=api_key, base_url=base_url)
+        logfire.info(
+            "Configured PydanticAI model {provider} model={model_name}",
+            provider="openai_compatible",
+            model_name=chosen,
+        )
         return OpenAIChatModel(chosen, provider=provider)
 
     ollama_url = os.getenv("OLLAMA_BASE_URL", "")
@@ -76,6 +97,11 @@ def get_pydantic_ai_model(model: str | None = None):
         from pydantic_ai.providers.ollama import OllamaProvider
         ollama_model = model or os.getenv("OLLAMA_MODEL", "llama3.2")
         provider = OllamaProvider(base_url=ollama_url)
+        logfire.info(
+            "Configured PydanticAI model {provider} model={model_name}",
+            provider="ollama",
+            model_name=ollama_model,
+        )
         return OllamaModel(ollama_model, provider=provider)
 
     raise ValueError(

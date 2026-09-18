@@ -20,6 +20,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "numpy>=1.26.0",
     "pydantic-ai>=2.44.0",
+    "logfire[requests]>=5.1.0",
 ]
 
 [project.scripts]
@@ -28,3 +29,6 @@ papertrail = "papertrail.cli:cli"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.logfire]
+ignore_no_config = true

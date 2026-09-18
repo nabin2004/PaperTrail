@@ -1661,6 +1661,9 @@ wheels = [
 httpx = [
     { name = "opentelemetry-instrumentation-httpx" },
 ]
+requests = [
+    { name = "opentelemetry-instrumentation-requests" },
+]
 
 [[package]]
 name = "logfire-api"
@@ -2409,6 +2412,21 @@ wheels = [
 ]
 
 [[package]]
+name = "opentelemetry-instrumentation-requests"
+version = "0.65b0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "opentelemetry-util-http" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c8/84/f46bf7976a81827419b085c9ed14562410c7599e07509786e9f6eb3c5438/opentelemetry_instrumentation_requests-0.65b0.tar.gz", hash = "sha256:1d601548f89236d5ab373c7208a2e1e162a8d6462b5b972f9ad8fb0ed82d7438", size = 18107, upload-time = "2026-07-16T15:26:18.532Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/42/45/6201afe846263d775cd4fc8d6a87dc8c15eb7921cdade4dca1e1227b04b6/opentelemetry_instrumentation_requests-0.65b0-py3-none-any.whl", hash = "sha256:91688ec0d4d1fed75ea8d026ef2c66274ed9868c22b6be211ef85d832d16f957", size = 13386, upload-time = "2026-07-16T15:25:31.093Z" },
+]
+
+[[package]]
 name = "opentelemetry-proto"
 version = "1.44.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2593,6 +2611,7 @@ dependencies = [
     { name = "langchain-huggingface" },
     { name = "langchain-openai" },
     { name = "langchain-text-splitters" },
+    { name = "logfire", extra = ["requests"] },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pydantic" },
@@ -2613,6 +2632,7 @@ requires-dist = [
     { name = "langchain-huggingface", specifier = ">=0.1.0" },
     { name = "langchain-openai", specifier = ">=0.3.0" },
     { name = "langchain-text-splitters", specifier = ">=0.3.0" },
+    { name = "logfire", extras = ["requests"], specifier = ">=5.1.0" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-ai", specifier = ">=2.44.0" },
