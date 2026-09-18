@@ -143,6 +143,8 @@ PaperTrail implements a **4-tier academic research team** powered by **PydanticA
 
 `tools.py` provides native typed functions (`search_local_papers`, `search_arxiv`, `download_and_index_paper`, `list_indexed_papers`, `get_trending_topics`, `read_paper_abstract`) for PydanticAI tool loops. Legacy LangChain wrappers remain for backward compatibility.
 
+Additionally, the research organization features **10 specialized research laboratories** (`src/papertrail/labs/`) categorized into Core Domains (LMI, AI, VI, RCI, SIKG, GI, RLDI), Cross-Cutting Methodologies (FMPT, ISAI), and Applications (AISL), supporting multi-lab matrix collaborations (`papertrail matrix`). See [Research Organization Guide](research_organization.md).
+
 ### 7. Evaluation (`src/papertrail/evaluation/`)
 
 | Module | Score Range | Primary Method | Fallback |

@@ -148,7 +148,30 @@ papertrail intern "multi-modal state space models" --collect
 papertrail intern "2312.00752" --reproduce
 ```
 
-### 6. Ask a question & Generate reports
+### 6. Research Laboratories & Matrix Projects
+
+PaperTrail organizes research into **10 specialized laboratories** spanning Core Domains, Cross-Cutting Methodologies, and Applications. Matrix projects combine domains and methodologies (e.g. `Agentic Intelligence × Foundation Model Post-Training`). See [docs/research_organization.md](docs/research_organization.md).
+
+```bash
+# List all 10 laboratories by category:
+papertrail labs
+
+# Direct inquiry to a specific laboratory:
+papertrail lab lmi "How do vision-language models handle fine-grained spatial grounding?"
+papertrail lab ai "What planning algorithms prevent looping in agent workflows?"
+papertrail lab fmpt "Compare DPO vs GRPO for mathematical reasoning alignment."
+papertrail lab isai "How does KV cache compression impact long-context inference throughput?"
+papertrail lab aisl "How can agents generate verifiable Manim animations for education?"
+
+# Launch a cross-lab matrix project (Domain x Methodologies x Applications):
+papertrail matrix "Autonomous Physics Tutor" \
+  --domain AI \
+  --methodology FMPT,ISAI \
+  --application AISL \
+  --mission "Post-train an agent that generates interactive Manim physics explanations."
+```
+
+### 7. Ask a question & Generate reports
 
 ```bash
 # Direct Q&A

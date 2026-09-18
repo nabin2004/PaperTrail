@@ -28,6 +28,8 @@ from papertrail.schemas.schema import (
     HypothesisSpec,
     ExperimentSpec,
     BenchmarkResult,
+    MatrixProject,
+    CrossLabSynthesis,
 )
 from papertrail.utils.llm import get_pydantic_ai_model
 
@@ -110,6 +112,18 @@ def create_lead_agent(
         or check reproduction feasibility.
         """
         return _intern.run_sync(task)
+
+    @agent.tool_plain
+    def consult_specialized_lab(lab_code: str, task: str) -> str:
+        """
+        Consult one of the 10 specialized research laboratories:
+        - Core Domains: LMI, AI, VI, RCI, SIKG, GI, RLDI
+        - Cross-Cutting Methodologies: FMPT, ISAI
+        - Applications: AISL
+        """
+        from papertrail.labs.lab_agent import ResearchLabAgent
+        lab_agent = ResearchLabAgent(lab_code=lab_code, model=resolved_model)
+        return lab_agent.run_sync(task)
 
     return agent
 
@@ -254,3 +268,21 @@ class LeadResearcher:
             f"4. As Lead, synthesize the final strategic direction, evaluating scientific viability and risks."
         )
         return self.run_sync(prompt)
+
+    def consult_lab(self, lab_code: str, task: str) -> str:
+        """
+        Directly consult one of the 10 specialized research laboratories.
+        """
+        from papertrail.labs.lab_agent import ResearchLabAgent
+        lab_agent = ResearchLabAgent(lab_code=lab_code, model=self.model)
+        return lab_agent.run_sync(task)
+
+    def orchestrate_matrix_collaboration(self, project: MatrixProject) -> CrossLabSynthesis:
+        """
+        Orchestrate a multi-lab cross-cutting matrix project across domains,
+        methodologies, and applications.
+        """
+        from papertrail.labs.collaboration import MatrixProjectCoordinator
+        coordinator = MatrixProjectCoordinator(model=self.model)
+        return coordinator.execute_matrix_project(project)
+

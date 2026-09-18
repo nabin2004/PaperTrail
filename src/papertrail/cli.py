@@ -859,6 +859,118 @@ def lead_cmd(prompt, orchestrate, review_quality, roadmap, as_json):
     console.print(Panel(Markdown(response), title="Research Lead Synthesis", border_style="magenta"))
 
 
+@cli.command(name="labs")
+def labs_cmd():
+    """List all 10 PaperTrail research laboratories by category."""
+    from papertrail.labs.registry import get_all_labs
+
+    labs = get_all_labs()
+    categories = {
+        "domain": "Core Research Domains",
+        "methodology": "Cross-Cutting Methodologies",
+        "application": "Applications & Translation",
+    }
+
+    md = "# PaperTrail Research Laboratories\n\n"
+    for cat_key, cat_title in categories.items():
+        cat_labs = [l for l in labs if l.category == cat_key]
+        if not cat_labs:
+            continue
+        md += f"## {cat_title}\n\n"
+        for lab in cat_labs:
+            md += f"### {lab.full_name} (`{lab.code}`)\n"
+            md += f"**Focus:** {lab.focus}\n\n"
+            md += f"**Key Topics:** {', '.join(lab.key_topics)}\n\n"
+
+    console.print(Panel(Markdown(md), title="Research Laboratories Directory", border_style="cyan"))
+
+
+@cli.command(name="lab")
+@click.argument("lab_code")
+@click.argument("prompt", required=False, default=None)
+def lab_cmd(lab_code, prompt):
+    """Interact directly with a specialized research laboratory (e.g. LMI, AI, FMPT, ISAI)."""
+    from papertrail.labs.lab_agent import ResearchLabAgent
+    from papertrail.labs.registry import get_lab
+
+    lab_info = get_lab(lab_code)
+    if not lab_info:
+        console.print(f"[red]Error:[/red] Unknown research lab code '{lab_code}'. Run [bold]papertrail labs[/bold] to see valid codes.")
+        return
+
+    if not prompt or not prompt.strip():
+        try:
+            prompt = click.prompt(f"Inquiry for the {lab_info.full_name}", type=str).strip()
+        except (click.Abort, EOFError):
+            console.print("\nCancelled.")
+            return
+
+    agent = ResearchLabAgent(lab_code=lab_info.code)
+    console.print(Panel(prompt, title=f"{lab_info.short_name} Inquiry", border_style="cyan"))
+
+    with Progress(SpinnerColumn(), TextColumn(f"{lab_info.code} Lab analyzing..."), console=console, transient=True):
+        response = agent.run_sync(prompt)
+
+    console.print(Panel(Markdown(response), title=f"{lab_info.code} Laboratory Findings", border_style="green"))
+
+
+@cli.command(name="matrix")
+@click.argument("project_name")
+@click.option("--domain", "-d", required=True, help="Primary domain lab code (e.g. AI, LMI, VI, RCI).")
+@click.option("--methodology", "-m", default="FMPT", help="Comma-separated cross-cutting methodology labs (e.g. FMPT,ISAI).")
+@click.option("--application", "-a", default="", help="Comma-separated application labs (e.g. AISL).")
+@click.option("--mission", required=False, default=None, help="High-level mission statement.")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output synthesis as JSON.")
+def matrix_cmd(project_name, domain, methodology, application, mission, as_json):
+    """Launch a cross-lab matrix project (e.g. Domain x Methodology x Application)."""
+    from papertrail.schemas.schema import MatrixProject
+    from papertrail.labs.collaboration import MatrixProjectCoordinator
+
+    if not mission or not mission.strip():
+        mission = f"Investigate cross-cutting breakthroughs at the intersection of {domain} and {methodology}."
+
+    methodologies = [m.strip().upper() for m in methodology.split(",") if m.strip()]
+    applications = [a.strip().upper() for a in application.split(",") if a.strip()]
+
+    proj = MatrixProject(
+        project_name=project_name,
+        primary_domain=domain.strip().upper(),
+        collaborating_methodologies=methodologies,
+        collaborating_applications=applications,
+        mission_statement=mission,
+    )
+
+    console.print(Panel(
+        f"**Project:** {proj.project_name}\n"
+        f"**Matrix:** `{proj.primary_domain}` × `{', '.join(proj.collaborating_methodologies)}`"
+        + (f" × `{', '.join(proj.collaborating_applications)}`" if proj.collaborating_applications else "") + "\n"
+        f"**Mission:** {proj.mission_statement}",
+        title="Cross-Lab Matrix Initiative",
+        border_style="magenta",
+    ))
+
+    coord = MatrixProjectCoordinator()
+    with Progress(SpinnerColumn(), TextColumn("Coordinating multi-lab matrix project..."), console=console, transient=True):
+        synthesis = coord.execute_matrix_project(proj)
+
+    if as_json:
+        console.print(synthesis.model_dump_json(indent=2))
+    else:
+        md = f"# Cross-Lab Synthesis: {synthesis.project_name}\n\n"
+        md += f"**Participating Labs:** {', '.join(synthesis.participating_labs)}\n\n"
+        md += f"## Executive Summary\n{synthesis.executive_summary}\n\n"
+        md += f"## Domain Breakthroughs ({proj.primary_domain})\n{synthesis.domain_insights}\n\n"
+        md += f"## Methodology & Systems Specifications\n{synthesis.methodology_specifications}\n\n"
+        if synthesis.application_impact:
+            md += f"## Downstream Application Impact\n{synthesis.application_impact}\n\n"
+        if synthesis.cross_cutting_synergies:
+            md += "## Cross-Cutting Synergies\n"
+            for syn in synthesis.cross_cutting_synergies:
+                md += f"- {syn}\n"
+
+        console.print(Panel(Markdown(md), title="Matrix Project Report", border_style="magenta"))
+
+
 @cli.command()
 @click.argument("topic")
 def plan(topic):

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, HttpUrl, Field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime
 
 
@@ -158,5 +158,58 @@ class ResearchRoadmap(BaseModel):
     cross_domain_connections: List[str] = Field(default_factory=list, description="Synergies with other AI subfields or disciplines")
     critical_risks: List[str] = Field(default_factory=list, description="Technical or scientific risks")
     delegation_plan: Dict[str, str] = Field(default_factory=dict, description="Assignments for Researcher, Assistant, and Intern")
+
+
+# ── Research Labs & Department Schemas ───────────────────────────────────────
+
+LabCategory = Literal["domain", "methodology", "application"]
+
+
+class LabInfo(BaseModel):
+    """Metadata specification for a research laboratory."""
+    code: str = Field(description="Short uppercase code, e.g. LMI, AI, FMPT")
+    full_name: str = Field(description="Formal lab title")
+    short_name: str = Field(description="Branded lab designation")
+    category: LabCategory = Field(description="Taxonomical category: domain, methodology, or application")
+    focus: str = Field(description="Core scientific mission and capabilities")
+    key_topics: List[str] = Field(default_factory=list, description="Key keywords, models, benchmarks, or methods")
+
+
+class InterLabRequest(BaseModel):
+    """Structured message sent from one research lab to another."""
+    from_lab: str = Field(description="Source laboratory code")
+    to_lab: str = Field(description="Target laboratory code")
+    task_description: str = Field(description="Objective, research query, or methodology request")
+    context: Dict[str, Any] = Field(default_factory=dict, description="Supplementary technical context or parameters")
+
+
+class InterLabResponse(BaseModel):
+    """Structured response returned by a consulted laboratory."""
+    from_lab: str = Field(description="Responding laboratory code")
+    to_lab: str = Field(description="Originating laboratory code")
+    analysis: str = Field(description="Technical evaluation and findings")
+    methodology_recommendations: List[str] = Field(default_factory=list, description="Recommended methods, architectures, or protocols")
+    proposed_experiments: List[str] = Field(default_factory=list, description="Concrete experiments or benchmarks suggested")
+
+
+class MatrixProject(BaseModel):
+    """Composite multi-lab research initiative crossing domains, methodologies, and applications."""
+    project_name: str = Field(description="Name or title of the collaborative research initiative")
+    primary_domain: str = Field(description="Core research domain lab code (e.g. AI, LMI, VI)")
+    collaborating_methodologies: List[str] = Field(default_factory=list, description="Cross-cutting methodology lab codes (e.g. FMPT, ISAI)")
+    collaborating_applications: List[str] = Field(default_factory=list, description="Application lab codes (e.g. AISL)")
+    mission_statement: str = Field(description="High-level research objective of the joint project")
+
+
+class CrossLabSynthesis(BaseModel):
+    """Integrated synthesis report generated from a matrix multi-lab collaboration."""
+    project_name: str = Field(description="Name of the matrix project")
+    participating_labs: List[str] = Field(description="List of lab codes contributing to this synthesis")
+    executive_summary: str = Field(description="High-level findings and strategic synthesis")
+    domain_insights: str = Field(description="Theoretical and algorithmic advances from the domain lab")
+    methodology_specifications: str = Field(description="Post-training, systems, and engineering specifications")
+    application_impact: Optional[str] = Field(default=None, description="Downstream impact and translation potential")
+    cross_cutting_synergies: List[str] = Field(default_factory=list, description="Specific breakthroughs enabled by the matrix intersection")
+
 
 
