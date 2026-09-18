@@ -3,6 +3,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from typing import List, Optional
 import requests
+import logfire
 from papertrail.schemas.schema import Paper
 
 
@@ -58,78 +59,91 @@ class ArxivClient:
         return url
 
     def fetch_papers(self) -> List[Paper]:
-        url = self.build_query_url()
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
+        with logfire.span(
+            "arxiv.fetch_papers",
+            query=self.query,
+            max_results=self.max_results,
+            categories=self.categories,
+        ):
+            url = self.build_query_url()
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
 
-        root = ET.fromstring(response.content)
-        ns = {
-            "atom": "http://www.w3.org/2005/Atom",
-            "arxiv": "http://arxiv.org/schemas/atom",
-        }
+            root = ET.fromstring(response.content)
+            ns = {
+                "atom": "http://www.w3.org/2005/Atom",
+                "arxiv": "http://arxiv.org/schemas/atom",
+            }
 
-        papers = []
-        for entry in root.findall("atom:entry", ns):
-            id_elem = entry.find("atom:id", ns)
-            if id_elem is None or not id_elem.text:
-                continue
-            arxiv_id = id_elem.text.split("/")[-1]
+            papers = []
+            for entry in root.findall("atom:entry", ns):
+                id_elem = entry.find("atom:id", ns)
+                if id_elem is None or not id_elem.text:
+                    continue
+                arxiv_id = id_elem.text.split("/")[-1]
 
-            title_elem = entry.find("atom:title", ns)
-            raw_title = title_elem.text if title_elem is not None and title_elem.text else ""
-            title = " ".join(raw_title.split())
+                title_elem = entry.find("atom:title", ns)
+                raw_title = title_elem.text if title_elem is not None and title_elem.text else ""
+                title = " ".join(raw_title.split())
 
-            summary_elem = entry.find("atom:summary", ns)
-            raw_abstract = summary_elem.text if summary_elem is not None and summary_elem.text else ""
-            abstract = " ".join(raw_abstract.split())
+                summary_elem = entry.find("atom:summary", ns)
+                raw_abstract = summary_elem.text if summary_elem is not None and summary_elem.text else ""
+                abstract = " ".join(raw_abstract.split())
 
-            authors = [
-                a.find("atom:name", ns).text.strip()
-                for a in entry.findall("atom:author", ns)
-                if a.find("atom:name", ns) is not None and a.find("atom:name", ns).text
-            ]
+                authors = [
+                    a.find("atom:name", ns).text.strip()
+                    for a in entry.findall("atom:author", ns)
+                    if a.find("atom:name", ns) is not None and a.find("atom:name", ns).text
+                ]
 
-            primary_cat_elem = entry.find("arxiv:primary_category", ns)
-            if primary_cat_elem is not None and "term" in primary_cat_elem.attrib:
-                primary_category = primary_cat_elem.attrib["term"]
-            else:
-                primary_category = self.categories[0] if self.categories else "cs.AI"
+                primary_cat_elem = entry.find("arxiv:primary_category", ns)
+                if primary_cat_elem is not None and "term" in primary_cat_elem.attrib:
+                    primary_category = primary_cat_elem.attrib["term"]
+                else:
+                    primary_category = self.categories[0] if self.categories else "cs.AI"
 
-            categories = [
-                c.attrib["term"]
-                for c in entry.findall("atom:category", ns)
-                if "term" in c.attrib
-            ]
-            if not categories and primary_category:
-                categories = [primary_category]
+                categories = [
+                    c.attrib["term"]
+                    for c in entry.findall("atom:category", ns)
+                    if "term" in c.attrib
+                ]
+                if not categories and primary_category:
+                    categories = [primary_category]
 
-            pub_elem = entry.find("atom:published", ns)
-            published = pub_elem.text if pub_elem is not None else ""
+                pub_elem = entry.find("atom:published", ns)
+                published = pub_elem.text if pub_elem is not None else ""
 
-            upd_elem = entry.find("atom:updated", ns)
-            updated = upd_elem.text if upd_elem is not None else published
+                upd_elem = entry.find("atom:updated", ns)
+                updated = upd_elem.text if upd_elem is not None else published
 
-            pdf_url = None
-            for l in entry.findall("atom:link", ns):
-                if l.attrib.get("title") == "pdf" or l.attrib.get("type") == "application/pdf":
-                    pdf_url = l.attrib.get("href")
-                    break
-            if not pdf_url:
-                pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+                pdf_url = None
+                for l in entry.findall("atom:link", ns):
+                    if l.attrib.get("title") == "pdf" or l.attrib.get("type") == "application/pdf":
+                        pdf_url = l.attrib.get("href")
+                        break
+                if not pdf_url:
+                    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
 
-            paper = Paper(
-                arxiv_id=arxiv_id,
-                title=title,
-                abstract=abstract,
-                authors=authors,
-                primary_category=primary_category,
-                categories=categories,
-                published=published,
-                updated=updated,
-                pdf_url=pdf_url,
+                paper = Paper(
+                    arxiv_id=arxiv_id,
+                    title=title,
+                    abstract=abstract,
+                    authors=authors,
+                    primary_category=primary_category,
+                    categories=categories,
+                    published=published,
+                    updated=updated,
+                    pdf_url=pdf_url,
+                )
+                papers.append(paper)
+
+            logfire.info(
+                "Fetched {count} papers from arXiv for query '{query}'",
+                count=len(papers),
+                query=self.query or "",
             )
-            papers.append(paper)
-        return papers
+            return papers
+
 
 
 if __name__ == "__main__":

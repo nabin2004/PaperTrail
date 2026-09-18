@@ -6,11 +6,14 @@ from pathlib import Path
 from typing import List, Optional
 
 import click
+import logfire
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
+
+from papertrail.utils.observability import setup_observability, cli_command_counter
 
 ## Makes cli command faster in windows by avoiding encoding issues with stdout/stderr
 if sys.platform == "win32":
@@ -48,6 +51,7 @@ class PaperTrailGroup(click.Group):
 def cli():
     """AI-powered research paper discovery and synthesis."""
     _load_dotenv()
+    setup_observability()
 
 
 def need_index(obj):
@@ -113,21 +117,24 @@ def _search_and_select_arxiv(
     from papertrail.ingestion.pipeline import index_single_paper
     from papertrail.retrieval.vectorstore import VectorStore
 
-    cats = [c.strip() for c in categories.split(",") if c.strip()] if categories else []
+    cli_command_counter.add(1, {"command": "arxiv"})
+    with logfire.span("cli.command.arxiv", query=query or "", limit=limit, sort=sort):
+        cats = [c.strip() for c in categories.split(",") if c.strip()] if categories else []
 
-    if not query or not query.strip():
-        try:
-            query = click.prompt("Enter search query for arXiv", type=str).strip()
-        except (click.Abort, EOFError):
-            console.print("\nCancelled.")
-            return
+        if not query or not query.strip():
+            try:
+                query = click.prompt("Enter search query for arXiv", type=str).strip()
+            except (click.Abort, EOFError):
+                console.print("\nCancelled.")
+                return
 
-    console.print(Panel(
-        f"Query: [bold cyan]{query}[/bold cyan]\n"
-        f"Limit: {limit} | Sort: {sort}" + (f" | Categories: {', '.join(cats)}" if cats else ""),
-        title="arXiv Search",
-        border_style="blue",
-    ))
+        console.print(Panel(
+            f"Query: [bold cyan]{query}[/bold cyan]\n"
+            f"Limit: {limit} | Sort: {sort}" + (f" | Categories: {', '.join(cats)}" if cats else ""),
+            title="arXiv Search",
+            border_style="blue",
+        ))
+
 
     with Progress(SpinnerColumn(), TextColumn("Searching arXiv..."), console=console, transient=True):
         client = ArxivClient(query=query, categories=cats, max_results=limit, sort_by=sort)
@@ -251,40 +258,43 @@ def _search_and_select_arxiv(
               help="Skip text cleaning step.")
 def ingest(categories, query, max_results, no_clean):
     """Fetch arXiv papers, download PDFs, and index them."""
-    from papertrail.ingestion.arxiv_client import ArxivClient
-    from papertrail.ingestion.pipeline import index_single_paper
-    from papertrail.retrieval.vectorstore import VectorStore
+    cli_command_counter.add(1, {"command": "ingest"})
+    with logfire.span("cli.command.ingest", categories=categories, query=query or "", max_results=max_results):
+        from papertrail.ingestion.arxiv_client import ArxivClient
+        from papertrail.ingestion.pipeline import index_single_paper
+        from papertrail.retrieval.vectorstore import VectorStore
 
-    cats = [c.strip() for c in categories.split(",") if c.strip()]
-    console.print(Panel(
-        f"Fetching up to {max_results} papers" + (f" for query '{query}'" if query else "") + f" from {', '.join(cats)}",
-        title="Ingest",
-        border_style="blue",
-    ))
+        cats = [c.strip() for c in categories.split(",") if c.strip()]
+        console.print(Panel(
+            f"Fetching up to {max_results} papers" + (f" for query '{query}'" if query else "") + f" from {', '.join(cats)}",
+            title="Ingest",
+            border_style="blue",
+        ))
 
-    client = ArxivClient(query=query, categories=cats, max_results=max_results)
-    console.print("Fetching paper list from arXiv...")
-    papers = client.fetch_papers()
-    console.print(f"Found {len(papers)} papers.")
+        client = ArxivClient(query=query, categories=cats, max_results=max_results)
+        console.print("Fetching paper list from arXiv...")
+        papers = client.fetch_papers()
+        console.print(f"Found {len(papers)} papers.")
 
-    store = VectorStore()
-    new_count = 0
-    total_chunks = 0
+        store = VectorStore()
+        new_count = 0
+        total_chunks = 0
 
-    for i, paper in enumerate(papers, 1):
-        console.print(f"[{i}/{len(papers)}] {paper.title[:80]}")
-        success, msg, n_chunks = index_single_paper(paper, store=store, clean=not no_clean)
-        console.print(f"  {msg}")
-        if success:
-            new_count += 1
-            total_chunks += n_chunks
+        for i, paper in enumerate(papers, 1):
+            console.print(f"[{i}/{len(papers)}] {paper.title[:80]}")
+            success, msg, n_chunks = index_single_paper(paper, store=store, clean=not no_clean)
+            console.print(f"  {msg}")
+            if success:
+                new_count += 1
+                total_chunks += n_chunks
 
-    console.print(Panel(
-        f"Done! Indexed {new_count} new papers. "
-        f"Total: {store.total_chunks} chunks, {len(store.indexed_paper_ids())} papers.",
-        title="Ingest",
-        border_style="blue",
-    ))
+        console.print(Panel(
+            f"Done! Indexed {new_count} new papers. "
+            f"Total: {store.total_chunks} chunks, {len(store.indexed_paper_ids())} papers.",
+            title="Ingest",
+            border_style="blue",
+        ))
+
 
 
 @cli.command(name="arxiv")
@@ -354,40 +364,42 @@ def discover_cmd(query, limit, categories, sort, download_all, select, no_clean)
               help="Maximum arXiv results to fetch when --arxiv is used.")
 def search(query, top_k, rerank, arxiv, limit):
     """Search indexed papers (or arXiv directly with --arxiv)."""
-    if arxiv:
-        _search_and_select_arxiv(query=query, limit=limit)
-        return
+    cli_command_counter.add(1, {"command": "search"})
+    with logfire.span("cli.command.search", query=query, top_k=top_k, rerank=rerank, arxiv=arxiv):
+        if arxiv:
+            _search_and_select_arxiv(query=query, limit=limit)
+            return
 
-    from papertrail.retrieval.retrievers import PaperRetriever
-    from papertrail.retrieval.reranker import rerank as do_rerank
+        from papertrail.retrieval.retrievers import PaperRetriever
+        from papertrail.retrieval.reranker import rerank as do_rerank
 
-    retriever = PaperRetriever()
-    need_index(retriever)
+        retriever = PaperRetriever()
+        need_index(retriever)
 
-    with Progress(SpinnerColumn(), TextColumn("Searching..."), console=console, transient=True):
-        results = retriever.retrieve(query, k=top_k * 3)
-        if rerank:
-            results = do_rerank(query, results, top_k=top_k)
-        else:
-            results = results[:top_k]
+        with Progress(SpinnerColumn(), TextColumn("Searching..."), console=console, transient=True):
+            results = retriever.retrieve(query, k=top_k * 3)
+            if rerank:
+                results = do_rerank(query, results, top_k=top_k)
+            else:
+                results = results[:top_k]
 
-    if not results:
-        console.print(Panel("No results found.", title="Search", border_style="blue"))
-        return
+        if not results:
+            console.print(Panel("No results found.", title="Search", border_style="blue"))
+            return
 
-    table = Table(title=f"Results for: {query}", show_lines=True)
-    table.add_column("#", style="dim", width=3)
-    table.add_column("Score", width=6)
-    table.add_column("Paper", style="cyan")
-    table.add_column("Excerpt")
+        table = Table(title=f"Results for: {query}", show_lines=True)
+        table.add_column("#", style="dim", width=3)
+        table.add_column("Score", width=6)
+        table.add_column("Paper", style="cyan")
+        table.add_column("Excerpt")
 
-    for i, r in enumerate(results, 1):
-        title = (r.title or r.paper_id)[:50]
-        authors = (", ".join(r.authors[:2]) + "...") if r.authors else ""
-        caption = f"{title}\n{authors} {r.published or ''}"
-        table.add_row(str(i), f"{r.score:.3f}", caption, r.text[:200] + "...")
+        for i, r in enumerate(results, 1):
+            title = (r.title or r.paper_id)[:50]
+            authors = (", ".join(r.authors[:2]) + "...") if r.authors else ""
+            caption = f"{title}\n{authors} {r.published or ''}"
+            table.add_row(str(i), f"{r.score:.3f}", caption, r.text[:200] + "...")
 
-    console.print(Panel(table, title="Search", border_style="blue"))
+        console.print(Panel(table, title="Search", border_style="blue"))
 
 
 @cli.command()
@@ -396,17 +408,19 @@ def search(query, top_k, rerank, arxiv, limit):
               help="Number of chunks used for answering.")
 def ask(question, top_k):
     """Ask a question about indexed papers."""
-    from papertrail.agents.research_agent import ResearchAgent
+    cli_command_counter.add(1, {"command": "ask"})
+    with logfire.span("cli.command.ask", question=question, top_k=top_k):
+        from papertrail.agents.research_agent import ResearchAgent
 
-    agent = ResearchAgent(rerank_k=top_k)
-    need_index(agent)
+        agent = ResearchAgent(rerank_k=top_k)
+        need_index(agent)
 
-    console.print(Panel(question, title="Question", border_style="blue"))
+        console.print(Panel(question, title="Question", border_style="blue"))
 
-    with Progress(SpinnerColumn(), TextColumn("Thinking..."), console=console, transient=True):
-        answer = agent.ask(question)
+        with Progress(SpinnerColumn(), TextColumn("Thinking..."), console=console, transient=True):
+            answer = agent.ask(question)
 
-    console.print(Panel(Markdown(answer), title="Answer", border_style="blue", expand=False))
+        console.print(Panel(Markdown(answer), title="Answer", border_style="blue", expand=False))
 
 
 @cli.command()
@@ -417,15 +431,18 @@ def ask(question, top_k):
               help="Optional path to save the report as Markdown.")
 def report(question, top_k, output):
     """Generate a research report."""
-    from papertrail.agents.research_agent import ResearchAgent
+    cli_command_counter.add(1, {"command": "report"})
+    with logfire.span("cli.command.report", question=question, top_k=top_k, output=str(output) if output else None):
+        from papertrail.agents.research_agent import ResearchAgent
 
-    agent = ResearchAgent(rerank_k=top_k)
-    need_index(agent)
+        agent = ResearchAgent(rerank_k=top_k)
+        need_index(agent)
 
-    console.print(Panel(question, title="Research Question", border_style="blue"))
+        console.print(Panel(question, title="Research Question", border_style="blue"))
 
-    with Progress(SpinnerColumn(), TextColumn("Running..."), console=console, transient=True):
-        rep = agent.research(question)
+        with Progress(SpinnerColumn(), TextColumn("Running..."), console=console, transient=True):
+            rep = agent.research(question)
+
 
     if rep.plan:
         console.print(Panel(
@@ -486,97 +503,106 @@ def report(question, top_k, output):
 @cli.command(name="list")
 def list_papers():
     """List indexed papers."""
-    from papertrail.ingestion.metadata import load_all_metadata
+    cli_command_counter.add(1, {"command": "list"})
+    with logfire.span("cli.command.list"):
+        from papertrail.ingestion.metadata import load_all_metadata
 
-    papers = load_all_metadata()
-    if not papers:
-        console.print(Panel("No papers indexed yet.", title="Papers", border_style="blue"))
-        return
+        papers = load_all_metadata()
+        if not papers:
+            console.print(Panel("No papers indexed yet.", title="Papers", border_style="blue"))
+            return
 
-    table = Table(title=f"{len(papers)} papers", show_lines=True)
-    table.add_column("arXiv ID", style="cyan", width=14)
-    table.add_column("Title")
-    table.add_column("Authors", width=30)
-    table.add_column("Date", width=12)
-    table.add_column("Category", width=10)
+        table = Table(title=f"{len(papers)} papers", show_lines=True)
+        table.add_column("arXiv ID", style="cyan", width=14)
+        table.add_column("Title")
+        table.add_column("Authors", width=30)
+        table.add_column("Date", width=12)
+        table.add_column("Category", width=10)
 
-    for p in papers:
-        authors = ", ".join(p.authors[:2]) + ("..." if len(p.authors) > 2 else "")
-        table.add_row(p.arxiv_id, p.title[:60], authors, str(p.published.date()), p.primary_category)
+        for p in papers:
+            authors = ", ".join(p.authors[:2]) + ("..." if len(p.authors) > 2 else "")
+            table.add_row(p.arxiv_id, p.title[:60], authors, str(p.published.date()), p.primary_category)
 
-    console.print(Panel(table, title="Papers", border_style="blue"))
+        console.print(Panel(table, title="Papers", border_style="blue"))
 
 
 @cli.command()
 @click.option("--top-n", default=20, show_default=True, help="Number of keywords to show.")
 def trends(top_n):
     """Show trending keywords and categories."""
-    from papertrail.ingestion.metadata import load_all_metadata
-    from papertrail.memory.trend_memory import TrendMemory
+    cli_command_counter.add(1, {"command": "trends"})
+    with logfire.span("cli.command.trends", top_n=top_n):
+        from papertrail.ingestion.metadata import load_all_metadata
+        from papertrail.memory.trend_memory import TrendMemory
 
-    papers = load_all_metadata()
-    if not papers:
-        console.print(Panel("No papers indexed yet.", title="Trends", border_style="blue"))
-        return
+        papers = load_all_metadata()
+        if not papers:
+            console.print(Panel("No papers indexed yet.", title="Trends", border_style="blue"))
+            return
 
-    mem = TrendMemory()
-    mem.update(papers)
+        mem = TrendMemory()
+        mem.update(papers)
 
-    kw_table = Table(title=f"Top {top_n} keywords", show_lines=False, box=None)
-    kw_table.add_column("Keyword", style="cyan")
-    kw_table.add_column("Count", justify="right")
-    for kw, cnt in mem.top_keywords(top_n):
-        kw_table.add_row(kw, str(cnt))
+        kw_table = Table(title=f"Top {top_n} keywords", show_lines=False, box=None)
+        kw_table.add_column("Keyword", style="cyan")
+        kw_table.add_column("Count", justify="right")
+        for kw, cnt in mem.top_keywords(top_n):
+            kw_table.add_row(kw, str(cnt))
 
-    cat_table = Table(title="Top categories", show_lines=False, box=None)
-    cat_table.add_column("Category", style="green")
-    cat_table.add_column("Count", justify="right")
-    for cat, cnt in mem.top_categories(10):
-        cat_table.add_row(cat, str(cnt))
+        cat_table = Table(title="Top categories", show_lines=False, box=None)
+        cat_table.add_column("Category", style="green")
+        cat_table.add_column("Count", justify="right")
+        for cat, cnt in mem.top_categories(10):
+            cat_table.add_row(cat, str(cnt))
 
-    console.print(Panel(kw_table, title="Keywords", border_style="blue"))
-    console.print(Panel(cat_table, title="Categories", border_style="blue"))
+        console.print(Panel(kw_table, title="Keywords", border_style="blue"))
+        console.print(Panel(cat_table, title="Categories", border_style="blue"))
 
 
 @cli.command()
 @click.option("--top-n", default=10, show_default=True, help="Number of recent papers to include in the digest.")
 def digest(top_n):
     """Generate a digest of recent papers."""
-    from papertrail.agents.research_agent import ResearchAgent
+    cli_command_counter.add(1, {"command": "digest"})
+    with logfire.span("cli.command.digest", top_n=top_n):
+        from papertrail.agents.research_agent import ResearchAgent
 
-    agent = ResearchAgent()
-    need_index(agent)
+        agent = ResearchAgent()
+        need_index(agent)
 
-    with Progress(SpinnerColumn(), TextColumn("Generating digest..."), console=console, transient=True):
-        summary = agent.generate_digest(k=top_n)
+        with Progress(SpinnerColumn(), TextColumn("Generating digest..."), console=console, transient=True):
+            summary = agent.generate_digest(k=top_n)
 
-    console.print(Panel(Markdown(summary), title="Digest", border_style="blue", expand=False))
+        console.print(Panel(Markdown(summary), title="Digest", border_style="blue", expand=False))
 
 
 @cli.command()
 @click.option("--yes", is_flag=True, default=False, help="Skip confirmation prompt.")
 def reset(yes):
     """Wipe the index and stored data."""
-    if not yes:
-        click.confirm("This will delete ALL indexed data. Continue?", abort=True)
+    cli_command_counter.add(1, {"command": "reset"})
+    with logfire.span("cli.command.reset"):
+        if not yes:
+            click.confirm("This will delete ALL indexed data. Continue?", abort=True)
 
-    import os
-    import shutil
-    from papertrail.retrieval.vectorstore import VectorStore
+        import os
+        import shutil
+        from papertrail.retrieval.vectorstore import VectorStore
 
-    store = VectorStore()
-    store.reset()
+        store = VectorStore()
+        store.reset()
 
-    data_dir = Path(os.getenv("DATA_DIR", "data"))
-    msg = "FAISS index cleared."
-    for subdir in ("metadata", "chunks", "processed"):
-        d = data_dir / subdir
-        if d.exists():
-            shutil.rmtree(d)
-            d.mkdir(parents=True, exist_ok=True)
-            msg += f"\nCleared {d}"
+        data_dir = Path(os.getenv("DATA_DIR", "data"))
+        msg = "FAISS index cleared."
+        for subdir in ("metadata", "chunks", "processed"):
+            d = data_dir / subdir
+            if d.exists():
+                shutil.rmtree(d)
+                d.mkdir(parents=True, exist_ok=True)
+                msg += f"\nCleared {d}"
 
-    console.print(Panel(msg, title="Reset", border_style="blue"))
+        console.print(Panel(msg, title="Reset", border_style="blue"))
+
 
 
 @cli.command(name="intern")
@@ -589,29 +615,31 @@ def reset(yes):
               help="Assess reproduction feasibility and requirements.")
 def intern_cmd(prompt, investigate, collect, reproduce):
     """Interact with the PaperTrail AI Research Intern (powered by PydanticAI)."""
-    from papertrail.agents.intern_agent import ResearchIntern
+    cli_command_counter.add(1, {"command": "intern"})
+    with logfire.span("cli.command.intern", prompt_preview=prompt[:60] if prompt else None):
+        from papertrail.agents.intern_agent import ResearchIntern
 
-    if not prompt or not prompt.strip():
-        try:
-            prompt = click.prompt("What would you like your Research Intern to do?", type=str).strip()
-        except (click.Abort, EOFError):
-            console.print("\nCancelled.")
-            return
+        if not prompt or not prompt.strip():
+            try:
+                prompt = click.prompt("What would you like your Research Intern to do?", type=str).strip()
+            except (click.Abort, EOFError):
+                console.print("\nCancelled.")
+                return
 
-    intern = ResearchIntern()
-    console.print(Panel(prompt, title="Research Intern Task", border_style="cyan"))
+        intern = ResearchIntern()
+        console.print(Panel(prompt, title="Research Intern Task", border_style="cyan"))
 
-    with Progress(SpinnerColumn(), TextColumn("Research Intern working..."), console=console, transient=True):
-        if collect:
-            response = intern.collect_data(prompt)
-        elif reproduce:
-            response = intern.reproduce_study(prompt)
-        elif investigate:
-            response = intern.investigate(prompt)
-        else:
-            response = intern.run_sync(prompt)
+        with Progress(SpinnerColumn(), TextColumn("Research Intern working..."), console=console, transient=True):
+            if collect:
+                response = intern.collect_data(prompt)
+            elif reproduce:
+                response = intern.reproduce_study(prompt)
+            elif investigate:
+                response = intern.investigate(prompt)
+            else:
+                response = intern.run_sync(prompt)
 
-    console.print(Panel(Markdown(response), title="Research Intern Report", border_style="green"))
+        console.print(Panel(Markdown(response), title="Research Intern Report", border_style="green"))
 
 
 @cli.command(name="assistant")
@@ -630,17 +658,20 @@ def intern_cmd(prompt, investigate, collect, reproduce):
               help="Output structured Pydantic model results as JSON.")
 def assistant_cmd(prompt, compare, gaps, benchmark, implement, dossier, as_json):
     """Interact with the Senior AI Research Assistant (powered by PydanticAI)."""
-    from papertrail.agents.assistant_agent import ResearchAssistant
+    cli_command_counter.add(1, {"command": "assistant"})
+    with logfire.span("cli.command.assistant", prompt_preview=prompt[:60] if prompt else None):
+        from papertrail.agents.assistant_agent import ResearchAssistant
 
-    if not prompt or not prompt.strip():
-        try:
-            prompt = click.prompt("What research question or topic should the Assistant analyze?", type=str).strip()
-        except (click.Abort, EOFError):
-            console.print("\nCancelled.")
-            return
+        if not prompt or not prompt.strip():
+            try:
+                prompt = click.prompt("What research question or topic should the Assistant analyze?", type=str).strip()
+            except (click.Abort, EOFError):
+                console.print("\nCancelled.")
+                return
 
-    assistant = ResearchAssistant()
-    console.print(Panel(prompt, title="Research Assistant Task", border_style="cyan"))
+        assistant = ResearchAssistant()
+        console.print(Panel(prompt, title="Research Assistant Task", border_style="cyan"))
+
 
     with Progress(SpinnerColumn(), TextColumn("Research Assistant analyzing..."), console=console, transient=True):
         if dossier:
@@ -742,39 +773,41 @@ def assistant_cmd(prompt, compare, gaps, benchmark, implement, dossier, as_json)
               help="Output structured HypothesisSpec or ExperimentSpec as JSON.")
 def researcher_cmd(prompt, hypothesis, experiment, interpret, plan, as_json):
     """Interact directly with the Tier 3 AI Researcher (powered by PydanticAI)."""
-    from papertrail.agents.scientist_agent import ResearcherAgent
+    cli_command_counter.add(1, {"command": "researcher"})
+    with logfire.span("cli.command.researcher", prompt_preview=prompt[:60] if prompt else None):
+        from papertrail.agents.scientist_agent import ResearcherAgent
 
-    if not prompt or not prompt.strip():
-        try:
-            prompt = click.prompt("What research question or task should the Researcher address?", type=str).strip()
-        except (click.Abort, EOFError):
-            console.print("\nCancelled.")
-            return
-
-    researcher = ResearcherAgent()
-    console.print(Panel(prompt, title="Researcher Task", border_style="blue"))
-
-    with Progress(SpinnerColumn(), TextColumn("Researcher working..."), console=console, transient=True):
-        if hypothesis:
-            if as_json:
-                spec = researcher.formulate_hypothesis_spec(prompt)
-                console.print(spec.model_dump_json(indent=2))
+        if not prompt or not prompt.strip():
+            try:
+                prompt = click.prompt("What research question or task should the Researcher address?", type=str).strip()
+            except (click.Abort, EOFError):
+                console.print("\nCancelled.")
                 return
-            response = researcher.generate_hypothesis(prompt)
-        elif experiment:
-            if as_json:
-                exp_spec = researcher.design_experiment_spec(prompt)
-                console.print(exp_spec.model_dump_json(indent=2))
-                return
-            response = researcher.design_experiment(prompt)
-        elif interpret:
-            response = researcher.interpret_results(prompt)
-        elif plan:
-            response = researcher.generate_plan(prompt)
-        else:
-            response = researcher.agent.run_sync(prompt).output
 
-    console.print(Panel(Markdown(str(response)), title="Researcher Output", border_style="blue"))
+        researcher = ResearcherAgent()
+        console.print(Panel(prompt, title="Researcher Task", border_style="blue"))
+
+        with Progress(SpinnerColumn(), TextColumn("Researcher working..."), console=console, transient=True):
+            if hypothesis:
+                if as_json:
+                    spec = researcher.formulate_hypothesis_spec(prompt)
+                    console.print(spec.model_dump_json(indent=2))
+                    return
+                response = researcher.generate_hypothesis(prompt)
+            elif experiment:
+                if as_json:
+                    exp_spec = researcher.design_experiment_spec(prompt)
+                    console.print(exp_spec.model_dump_json(indent=2))
+                    return
+                response = researcher.design_experiment(prompt)
+            elif interpret:
+                response = researcher.interpret_results(prompt)
+            elif plan:
+                response = researcher.generate_plan(prompt)
+            else:
+                response = researcher.agent.run_sync(prompt).output
+
+        console.print(Panel(Markdown(str(response)), title="Researcher Output", border_style="blue"))
 
 
 @cli.command(name="lead")
@@ -789,17 +822,20 @@ def researcher_cmd(prompt, hypothesis, experiment, interpret, plan, as_json):
               help="Output scorecard or roadmap as JSON.")
 def lead_cmd(prompt, orchestrate, review_quality, roadmap, as_json):
     """Interact with the Senior Research Lead & PI (Chief User Interface, powered by PydanticAI)."""
-    from papertrail.agents.lead_agent import LeadResearcher
+    cli_command_counter.add(1, {"command": "lead"})
+    with logfire.span("cli.command.lead", prompt_preview=prompt[:60] if prompt else None):
+        from papertrail.agents.lead_agent import LeadResearcher
 
-    if not prompt or not prompt.strip():
-        try:
-            prompt = click.prompt("What research initiative or question would you like to direct?", type=str).strip()
-        except (click.Abort, EOFError):
-            console.print("\nCancelled.")
-            return
+        if not prompt or not prompt.strip():
+            try:
+                prompt = click.prompt("What research initiative or question would you like to direct?", type=str).strip()
+            except (click.Abort, EOFError):
+                console.print("\nCancelled.")
+                return
 
-    lead = LeadResearcher()
-    console.print(Panel(prompt, title="Research Lead Directive", border_style="magenta"))
+        lead = LeadResearcher()
+        console.print(Panel(prompt, title="Research Lead Directive", border_style="magenta"))
+
 
     with Progress(SpinnerColumn(), TextColumn("Research Lead orchestrating..."), console=console, transient=True):
         if review_quality:
@@ -862,27 +898,29 @@ def lead_cmd(prompt, orchestrate, review_quality, roadmap, as_json):
 @cli.command(name="labs")
 def labs_cmd():
     """List all 10 PaperTrail research laboratories by category."""
-    from papertrail.labs.registry import get_all_labs
+    cli_command_counter.add(1, {"command": "labs"})
+    with logfire.span("cli.command.labs"):
+        from papertrail.labs.registry import get_all_labs
 
-    labs = get_all_labs()
-    categories = {
-        "domain": "Core Research Domains",
-        "methodology": "Cross-Cutting Methodologies",
-        "application": "Applications & Translation",
-    }
+        labs = get_all_labs()
+        categories = {
+            "domain": "Core Research Domains",
+            "methodology": "Cross-Cutting Methodologies",
+            "application": "Applications & Translation",
+        }
 
-    md = "# PaperTrail Research Laboratories\n\n"
-    for cat_key, cat_title in categories.items():
-        cat_labs = [l for l in labs if l.category == cat_key]
-        if not cat_labs:
-            continue
-        md += f"## {cat_title}\n\n"
-        for lab in cat_labs:
-            md += f"### {lab.full_name} (`{lab.code}`)\n"
-            md += f"**Focus:** {lab.focus}\n\n"
-            md += f"**Key Topics:** {', '.join(lab.key_topics)}\n\n"
+        md = "# PaperTrail Research Laboratories\n\n"
+        for cat_key, cat_title in categories.items():
+            cat_labs = [l for l in labs if l.category == cat_key]
+            if not cat_labs:
+                continue
+            md += f"## {cat_title}\n\n"
+            for lab in cat_labs:
+                md += f"### {lab.full_name} (`{lab.code}`)\n"
+                md += f"**Focus:** {lab.focus}\n\n"
+                md += f"**Key Topics:** {', '.join(lab.key_topics)}\n\n"
 
-    console.print(Panel(Markdown(md), title="Research Laboratories Directory", border_style="cyan"))
+        console.print(Panel(Markdown(md), title="Research Laboratories Directory", border_style="cyan"))
 
 
 @cli.command(name="lab")
@@ -890,28 +928,30 @@ def labs_cmd():
 @click.argument("prompt", required=False, default=None)
 def lab_cmd(lab_code, prompt):
     """Interact directly with a specialized research laboratory (e.g. LMI, AI, FMPT, ISAI)."""
-    from papertrail.labs.lab_agent import ResearchLabAgent
-    from papertrail.labs.registry import get_lab
+    cli_command_counter.add(1, {"command": "lab", "lab_code": lab_code.upper()})
+    with logfire.span("cli.command.lab", lab_code=lab_code.upper(), prompt_preview=prompt[:60] if prompt else None):
+        from papertrail.labs.lab_agent import ResearchLabAgent
+        from papertrail.labs.registry import get_lab
 
-    lab_info = get_lab(lab_code)
-    if not lab_info:
-        console.print(f"[red]Error:[/red] Unknown research lab code '{lab_code}'. Run [bold]papertrail labs[/bold] to see valid codes.")
-        return
-
-    if not prompt or not prompt.strip():
-        try:
-            prompt = click.prompt(f"Inquiry for the {lab_info.full_name}", type=str).strip()
-        except (click.Abort, EOFError):
-            console.print("\nCancelled.")
+        lab_info = get_lab(lab_code)
+        if not lab_info:
+            console.print(f"[red]Error:[/red] Unknown research lab code '{lab_code}'. Run [bold]papertrail labs[/bold] to see valid codes.")
             return
 
-    agent = ResearchLabAgent(lab_code=lab_info.code)
-    console.print(Panel(prompt, title=f"{lab_info.short_name} Inquiry", border_style="cyan"))
+        if not prompt or not prompt.strip():
+            try:
+                prompt = click.prompt(f"Inquiry for the {lab_info.full_name}", type=str).strip()
+            except (click.Abort, EOFError):
+                console.print("\nCancelled.")
+                return
 
-    with Progress(SpinnerColumn(), TextColumn(f"{lab_info.code} Lab analyzing..."), console=console, transient=True):
-        response = agent.run_sync(prompt)
+        agent = ResearchLabAgent(lab_code=lab_info.code)
+        console.print(Panel(prompt, title=f"{lab_info.short_name} Inquiry", border_style="cyan"))
 
-    console.print(Panel(Markdown(response), title=f"{lab_info.code} Laboratory Findings", border_style="green"))
+        with Progress(SpinnerColumn(), TextColumn(f"{lab_info.code} Lab analyzing..."), console=console, transient=True):
+            response = agent.run_sync(prompt)
+
+        console.print(Panel(Markdown(response), title=f"{lab_info.code} Laboratory Findings", border_style="green"))
 
 
 @cli.command(name="matrix")
@@ -923,91 +963,100 @@ def lab_cmd(lab_code, prompt):
 @click.option("--json", "as_json", is_flag=True, default=False, help="Output synthesis as JSON.")
 def matrix_cmd(project_name, domain, methodology, application, mission, as_json):
     """Launch a cross-lab matrix project (e.g. Domain x Methodology x Application)."""
-    from papertrail.schemas.schema import MatrixProject
-    from papertrail.labs.collaboration import MatrixProjectCoordinator
+    cli_command_counter.add(1, {"command": "matrix", "project": project_name})
+    with logfire.span("cli.command.matrix", project=project_name, domain=domain):
+        from papertrail.schemas.schema import MatrixProject
+        from papertrail.labs.collaboration import MatrixProjectCoordinator
 
-    if not mission or not mission.strip():
-        mission = f"Investigate cross-cutting breakthroughs at the intersection of {domain} and {methodology}."
+        if not mission or not mission.strip():
+            mission = f"Investigate cross-cutting breakthroughs at the intersection of {domain} and {methodology}."
 
-    methodologies = [m.strip().upper() for m in methodology.split(",") if m.strip()]
-    applications = [a.strip().upper() for a in application.split(",") if a.strip()]
+        methodologies = [m.strip().upper() for m in methodology.split(",") if m.strip()]
+        applications = [a.strip().upper() for a in application.split(",") if a.strip()]
 
-    proj = MatrixProject(
-        project_name=project_name,
-        primary_domain=domain.strip().upper(),
-        collaborating_methodologies=methodologies,
-        collaborating_applications=applications,
-        mission_statement=mission,
-    )
+        proj = MatrixProject(
+            project_name=project_name,
+            primary_domain=domain.strip().upper(),
+            collaborating_methodologies=methodologies,
+            collaborating_applications=applications,
+            mission_statement=mission,
+        )
 
-    console.print(Panel(
-        f"**Project:** {proj.project_name}\n"
-        f"**Matrix:** `{proj.primary_domain}` × `{', '.join(proj.collaborating_methodologies)}`"
-        + (f" × `{', '.join(proj.collaborating_applications)}`" if proj.collaborating_applications else "") + "\n"
-        f"**Mission:** {proj.mission_statement}",
-        title="Cross-Lab Matrix Initiative",
-        border_style="magenta",
-    ))
+        console.print(Panel(
+            f"**Project:** {proj.project_name}\n"
+            f"**Matrix:** `{proj.primary_domain}` × `{', '.join(proj.collaborating_methodologies)}`"
+            + (f" × `{', '.join(proj.collaborating_applications)}`" if proj.collaborating_applications else "") + "\n"
+            f"**Mission:** {proj.mission_statement}",
+            title="Cross-Lab Matrix Initiative",
+            border_style="magenta",
+        ))
 
-    coord = MatrixProjectCoordinator()
-    with Progress(SpinnerColumn(), TextColumn("Coordinating multi-lab matrix project..."), console=console, transient=True):
-        synthesis = coord.execute_matrix_project(proj)
+        coord = MatrixProjectCoordinator()
+        with Progress(SpinnerColumn(), TextColumn("Coordinating multi-lab matrix project..."), console=console, transient=True):
+            synthesis = coord.execute_matrix_project(proj)
 
-    if as_json:
-        console.print(synthesis.model_dump_json(indent=2))
-    else:
-        md = f"# Cross-Lab Synthesis: {synthesis.project_name}\n\n"
-        md += f"**Participating Labs:** {', '.join(synthesis.participating_labs)}\n\n"
-        md += f"## Executive Summary\n{synthesis.executive_summary}\n\n"
-        md += f"## Domain Breakthroughs ({proj.primary_domain})\n{synthesis.domain_insights}\n\n"
-        md += f"## Methodology & Systems Specifications\n{synthesis.methodology_specifications}\n\n"
-        if synthesis.application_impact:
-            md += f"## Downstream Application Impact\n{synthesis.application_impact}\n\n"
-        if synthesis.cross_cutting_synergies:
-            md += "## Cross-Cutting Synergies\n"
-            for syn in synthesis.cross_cutting_synergies:
-                md += f"- {syn}\n"
+        if as_json:
+            console.print(synthesis.model_dump_json(indent=2))
+        else:
+            md = f"# Cross-Lab Synthesis: {synthesis.project_name}\n\n"
+            md += f"**Participating Labs:** {', '.join(synthesis.participating_labs)}\n\n"
+            md += f"## Executive Summary\n{synthesis.executive_summary}\n\n"
+            md += f"## Domain Breakthroughs ({proj.primary_domain})\n{synthesis.domain_insights}\n\n"
+            md += f"## Methodology & Systems Specifications\n{synthesis.methodology_specifications}\n\n"
+            if synthesis.application_impact:
+                md += f"## Downstream Application Impact\n{synthesis.application_impact}\n\n"
+            if synthesis.cross_cutting_synergies:
+                md += "## Cross-Cutting Synergies\n"
+                for syn in synthesis.cross_cutting_synergies:
+                    md += f"- {syn}\n"
 
-        console.print(Panel(Markdown(md), title="Matrix Project Report", border_style="magenta"))
+            console.print(Panel(Markdown(md), title="Matrix Project Report", border_style="magenta"))
 
 
 @cli.command()
 @click.argument("topic")
 def plan(topic):
     """Generate a research plan using the AI Scientist."""
-    from papertrail.agents.scientist_agent import ScientistAgent
+    cli_command_counter.add(1, {"command": "plan"})
+    with logfire.span("cli.command.plan", topic=topic):
+        from papertrail.agents.scientist_agent import ScientistAgent
 
-    agent = ScientistAgent()
-    console.print(Panel(topic, title="Research Topic", border_style="blue"))
-    with Progress(SpinnerColumn(), TextColumn("Scientist planning..."), console=console, transient=True):
-        output = agent.generate_plan(topic)
-    console.print(Panel(Markdown(output), title="Research Plan", border_style="blue"))
+        agent = ScientistAgent()
+        console.print(Panel(topic, title="Research Topic", border_style="blue"))
+        with Progress(SpinnerColumn(), TextColumn("Scientist planning..."), console=console, transient=True):
+            output = agent.generate_plan(topic)
+        console.print(Panel(Markdown(output), title="Research Plan", border_style="blue"))
 
 
 @cli.command()
 @click.argument("topic")
 def hypothesis(topic):
     """Formulate novel research hypotheses using the AI Scientist."""
-    from papertrail.agents.scientist_agent import ScientistAgent
+    cli_command_counter.add(1, {"command": "hypothesis"})
+    with logfire.span("cli.command.hypothesis", topic=topic):
+        from papertrail.agents.scientist_agent import ScientistAgent
 
-    agent = ScientistAgent()
-    console.print(Panel(topic, title="Topic", border_style="blue"))
-    with Progress(SpinnerColumn(), TextColumn("Scientist hypothesizing..."), console=console, transient=True):
-        output = agent.generate_hypothesis(topic)
-    console.print(Panel(Markdown(output), title="Hypotheses", border_style="blue"))
+        agent = ScientistAgent()
+        console.print(Panel(topic, title="Topic", border_style="blue"))
+        with Progress(SpinnerColumn(), TextColumn("Scientist hypothesizing..."), console=console, transient=True):
+            output = agent.generate_hypothesis(topic)
+        console.print(Panel(Markdown(output), title="Hypotheses", border_style="blue"))
 
 
 @cli.command()
 @click.argument("hypothesis_text")
 def experiment(hypothesis_text):
     """Design empirical experiments for a hypothesis using the AI Scientist."""
-    from papertrail.agents.scientist_agent import ScientistAgent
+    cli_command_counter.add(1, {"command": "experiment"})
+    with logfire.span("cli.command.experiment", hypothesis_preview=hypothesis_text[:60]):
+        from papertrail.agents.scientist_agent import ScientistAgent
 
-    agent = ScientistAgent()
-    console.print(Panel(hypothesis_text, title="Hypothesis", border_style="blue"))
-    with Progress(SpinnerColumn(), TextColumn("Designing experiment..."), console=console, transient=True):
-        output = agent.design_experiment(hypothesis_text)
-    console.print(Panel(Markdown(output), title="Experiment Design", border_style="blue"))
+        agent = ScientistAgent()
+        console.print(Panel(hypothesis_text, title="Hypothesis", border_style="blue"))
+        with Progress(SpinnerColumn(), TextColumn("Designing experiment..."), console=console, transient=True):
+            output = agent.design_experiment(hypothesis_text)
+        console.print(Panel(Markdown(output), title="Experiment Design", border_style="blue"))
+
 
 
 
