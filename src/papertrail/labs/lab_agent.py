@@ -24,6 +24,8 @@ from papertrail.agents.tools import (
     list_indexed_papers,
 )
 from papertrail.utils.llm import get_pydantic_ai_model
+from papertrail.utils.observability import extract_model_name, agent_run_counter
+import logfire
 
 
 def build_lab_system_prompt(lab: LabInfo) -> str:
@@ -125,6 +127,7 @@ class ResearchLabAgent:
             raise ValueError(f"Unknown research lab code: '{lab_code}'")
         self.code = self.lab_info.code
         self.model = model
+        self.model_name = extract_model_name(model)
         self.agent = create_lab_pydantic_agent(lab_code=self.code, model=model)
         self._responder_agent: Optional[Agent[None, InterLabResponse]] = None
 
@@ -136,41 +139,99 @@ class ResearchLabAgent:
 
     def run_sync(self, prompt: str) -> str:
         """Run the laboratory agent synchronously."""
-        result = self.agent.run_sync(prompt)
-        return str(result.output)
+        with logfire.span(
+            "lab_agent.run_sync",
+            lab_code=self.code,
+            lab_name=self.lab_info.full_name,
+            model=self.model_name,
+            prompt_preview=prompt[:80],
+        ):
+            logfire.info(
+                "Lab {lab_code} ({lab_name}) running task with model {model}",
+                lab_code=self.code,
+                lab_name=self.lab_info.short_name,
+                model=self.model_name,
+                prompt_preview=prompt[:80],
+            )
+            agent_run_counter.add(1, {"agent": f"lab_{self.code.lower()}", "model": self.model_name})
+            result = self.agent.run_sync(prompt)
+            return str(result.output)
 
     async def run(self, prompt: str) -> str:
         """Run the laboratory agent asynchronously."""
-        result = await self.agent.run(prompt)
-        return str(result.output)
+        with logfire.span(
+            "lab_agent.run_async",
+            lab_code=self.code,
+            lab_name=self.lab_info.full_name,
+            model=self.model_name,
+            prompt_preview=prompt[:80],
+        ):
+            logfire.info(
+                "Lab {lab_code} ({lab_name}) running async task with model {model}",
+                lab_code=self.code,
+                lab_name=self.lab_info.short_name,
+                model=self.model_name,
+                prompt_preview=prompt[:80],
+            )
+            agent_run_counter.add(1, {"agent": f"lab_{self.code.lower()}", "model": self.model_name})
+            result = await self.agent.run(prompt)
+            return str(result.output)
 
     def handle_interlab_request(self, request: InterLabRequest) -> InterLabResponse:
         """
         Process a structured consultation request from another laboratory.
         """
-        prompt = (
-            f"InterLab Consultation Request from {request.from_lab} Lab to {self.code} Lab:\n"
-            f"Task/Objective: {request.task_description}\n"
-            f"Context: {request.context}\n\n"
-            f"Provide your specialized {self.lab_info.full_name} analysis, concrete methodology recommendations, "
-            f"and proposed validation experiments."
-        )
-        result = self.responder_agent.run_sync(prompt)
-        # Ensure correct lab routing metadata
-        resp = result.output
-        resp.from_lab = self.code
-        resp.to_lab = request.from_lab
-        return resp
+        with logfire.span(
+            "lab_agent.handle_interlab_request",
+            from_lab=request.from_lab,
+            to_lab=self.code,
+            model=self.model_name,
+        ):
+            logfire.info(
+                "Lab {to_lab} responding to consultation request from {from_lab} with model {model}",
+                to_lab=self.code,
+                from_lab=request.from_lab,
+                model=self.model_name,
+            )
+            agent_run_counter.add(
+                1,
+                {"agent": f"lab_{self.code.lower()}", "model": self.model_name, "action": "interlab_response"},
+            )
+            prompt = (
+                f"InterLab Consultation Request from {request.from_lab} Lab to {self.code} Lab:\n"
+                f"Task/Objective: {request.task_description}\n"
+                f"Context: {request.context}\n\n"
+                f"Provide your specialized {self.lab_info.full_name} analysis, concrete methodology recommendations, "
+                f"and proposed validation experiments."
+            )
+            result = self.responder_agent.run_sync(prompt)
+            # Ensure correct lab routing metadata
+            resp = result.output
+            resp.from_lab = self.code
+            resp.to_lab = request.from_lab
+            return resp
 
     def consult_lab(self, target_lab_code: str, task: str, context: Optional[Dict[str, Any]] = None) -> InterLabResponse:
         """
         Send a consultation request to a peer laboratory.
         """
-        req = InterLabRequest(
+        with logfire.span(
+            "lab_agent.consult_lab",
             from_lab=self.code,
             to_lab=target_lab_code.upper(),
-            task_description=task,
-            context=context or {},
-        )
-        target_agent = ResearchLabAgent(lab_code=target_lab_code, model=self.model)
-        return target_agent.handle_interlab_request(req)
+            model=self.model_name,
+        ):
+            logfire.info(
+                "Lab {from_lab} consulting peer lab {to_lab} with model {model}",
+                from_lab=self.code,
+                to_lab=target_lab_code.upper(),
+                model=self.model_name,
+            )
+            req = InterLabRequest(
+                from_lab=self.code,
+                to_lab=target_lab_code.upper(),
+                task_description=task,
+                context=context or {},
+            )
+            target_agent = ResearchLabAgent(lab_code=target_lab_code, model=self.model)
+            return target_agent.handle_interlab_request(req)

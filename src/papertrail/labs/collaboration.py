@@ -20,6 +20,8 @@ from papertrail.schemas.schema import (
     InterLabRequest,
 )
 from papertrail.utils.llm import get_pydantic_ai_model
+from papertrail.utils.observability import extract_model_name, agent_run_counter
+import logfire
 
 
 def create_matrix_synthesis_agent(model: Model | str | None = None) -> Agent[None, CrossLabSynthesis]:
@@ -51,6 +53,7 @@ class MatrixProjectCoordinator:
 
     def __init__(self, model: Model | str | None = None) -> None:
         self.model = model
+        self.model_name = extract_model_name(model)
         self._synthesis_agent: Optional[Agent[None, CrossLabSynthesis]] = None
 
     @property
@@ -67,53 +70,76 @@ class MatrixProjectCoordinator:
         participating = [project.primary_domain] + project.collaborating_methodologies + project.collaborating_applications
         unique_labs = list(dict.fromkeys(participating))
 
-        # 1. Gather Domain Lab Insights
-        domain_agent = ResearchLabAgent(lab_code=project.primary_domain, model=self.model)
-        domain_prompt = (
-            f"Matrix Project: '{project.project_name}'\n"
-            f"Mission: {project.mission_statement}\n"
-            f"As the primary domain lab ({project.primary_domain}), articulate the core theoretical mechanisms, "
-            f"foundational models, algorithms, and key challenges for this initiative."
-        )
-        domain_output = domain_agent.run_sync(domain_prompt)
-
-        # 2. Gather Methodology Lab Specifications
-        methodology_outputs: List[str] = []
-        for m_code in project.collaborating_methodologies:
-            m_agent = ResearchLabAgent(lab_code=m_code, model=self.model)
-            m_prompt = (
-                f"Matrix Project: '{project.project_name}'\n"
-                f"Domain Context from {project.primary_domain}: {domain_output[:400]}\n"
-                f"As the cross-cutting methodology lab ({m_code}), specify the exact adaptation, training, "
-                f"loss formulations, optimization algorithms, and infrastructure requirements."
+        with logfire.span(
+            "matrix_collaboration.execute",
+            project_name=project.project_name,
+            primary_domain=project.primary_domain,
+            participating_labs=unique_labs,
+            model=self.model_name,
+        ):
+            logfire.info(
+                "Coordinating cross-lab matrix project {project} across {labs} with model {model}",
+                project=project.project_name,
+                labs=", ".join(unique_labs),
+                model=self.model_name,
             )
-            m_resp = m_agent.run_sync(m_prompt)
-            methodology_outputs.append(f"[{m_code} Lab]: {m_resp}")
-
-        # 3. Gather Application Lab Translation (if any)
-        application_outputs: List[str] = []
-        for a_code in project.collaborating_applications:
-            a_agent = ResearchLabAgent(lab_code=a_code, model=self.model)
-            a_prompt = (
-                f"Matrix Project: '{project.project_name}'\n"
-                f"Mission: {project.mission_statement}\n"
-                f"As the application & translation lab ({a_code}), outline real-world deployment scenarios, "
-                f"evaluation benchmarks, user/learner impact, and practical considerations."
+            agent_run_counter.add(
+                1,
+                {"agent": "matrix_coordinator", "model": self.model_name, "project": project.project_name},
             )
-            a_resp = a_agent.run_sync(a_prompt)
-            application_outputs.append(f"[{a_code} Lab]: {a_resp}")
 
-        # 4. Synthesize via Structured Pydantic Model
-        synth_prompt = (
-            f"Synthesize this multi-lab matrix project into a CrossLabSynthesis report:\n"
-            f"Project Name: {project.project_name}\n"
-            f"Participating Labs: {', '.join(unique_labs)}\n"
-            f"Primary Domain Input: {domain_output}\n"
-            f"Methodology Contributions: {' | '.join(methodology_outputs)}\n"
-            f"Application Contributions: {' | '.join(application_outputs) if application_outputs else 'None'}\n"
-        )
-        result = self.synthesis_agent.run_sync(synth_prompt)
-        synthesis = result.output
-        synthesis.project_name = project.project_name
-        synthesis.participating_labs = unique_labs
-        return synthesis
+            # 1. Gather Domain Lab Insights
+            with logfire.span("matrix_collaboration.domain_insights", domain=project.primary_domain):
+                domain_agent = ResearchLabAgent(lab_code=project.primary_domain, model=self.model)
+                domain_prompt = (
+                    f"Matrix Project: '{project.project_name}'\n"
+                    f"Mission: {project.mission_statement}\n"
+                    f"As the primary domain lab ({project.primary_domain}), articulate the core theoretical mechanisms, "
+                    f"foundational models, algorithms, and key challenges for this initiative."
+                )
+                domain_output = domain_agent.run_sync(domain_prompt)
+
+            # 2. Gather Methodology Lab Specifications
+            methodology_outputs: List[str] = []
+            for m_code in project.collaborating_methodologies:
+                with logfire.span("matrix_collaboration.methodology_insights", methodology=m_code):
+                    m_agent = ResearchLabAgent(lab_code=m_code, model=self.model)
+                    m_prompt = (
+                        f"Matrix Project: '{project.project_name}'\n"
+                        f"Domain Context from {project.primary_domain}: {domain_output[:400]}\n"
+                        f"As the cross-cutting methodology lab ({m_code}), specify the exact adaptation, training, "
+                        f"loss formulations, optimization algorithms, and infrastructure requirements."
+                    )
+                    m_resp = m_agent.run_sync(m_prompt)
+                    methodology_outputs.append(f"[{m_code} Lab]: {m_resp}")
+
+            # 3. Gather Application Lab Translation (if any)
+            application_outputs: List[str] = []
+            for a_code in project.collaborating_applications:
+                with logfire.span("matrix_collaboration.application_insights", application=a_code):
+                    a_agent = ResearchLabAgent(lab_code=a_code, model=self.model)
+                    a_prompt = (
+                        f"Matrix Project: '{project.project_name}'\n"
+                        f"Mission: {project.mission_statement}\n"
+                        f"As the application & translation lab ({a_code}), outline real-world deployment scenarios, "
+                        f"evaluation benchmarks, user/learner impact, and practical considerations."
+                    )
+                    a_resp = a_agent.run_sync(a_prompt)
+                    application_outputs.append(f"[{a_code} Lab]: {a_resp}")
+
+            # 4. Synthesize via Structured Pydantic Model
+            with logfire.span("matrix_collaboration.synthesis", model=self.model_name):
+                synth_prompt = (
+                    f"Synthesize this multi-lab matrix project into a CrossLabSynthesis report:\n"
+                    f"Project Name: {project.project_name}\n"
+                    f"Participating Labs: {', '.join(unique_labs)}\n"
+                    f"Primary Domain Input: {domain_output}\n"
+                    f"Methodology Contributions: {' | '.join(methodology_outputs)}\n"
+                    f"Application Contributions: {' | '.join(application_outputs) if application_outputs else 'None'}\n"
+                )
+                result = self.synthesis_agent.run_sync(synth_prompt)
+                synthesis = result.output
+                synthesis.project_name = project.project_name
+                synthesis.participating_labs = unique_labs
+                return synthesis
+

@@ -26,6 +26,8 @@ from papertrail.memory.trend_memory import TrendMemory
 from papertrail.retrieval.reranker import rerank
 from papertrail.retrieval.retrievers import PaperRetriever
 from papertrail.schemas.schema import ResearchReport, SearchResult
+from papertrail.utils.observability import extract_model_name, agent_run_counter
+import logfire
 
 
 class ResearchAgent:
@@ -53,6 +55,7 @@ class ResearchAgent:
         self.trends = TrendMemory()
         self.retrieve_k = retrieve_k
         self.rerank_k = rerank_k
+        self.model_name = extract_model_name()
         self._intern = None
 
     @property
@@ -72,48 +75,61 @@ class ResearchAgent:
 
         Returns a ResearchReport with synthesis, critique, and eval scores.
         """
-        # 1. Plan
-        plan = plan_research(question)
-
-        # 2. Retrieve  (use all plan queries, deduplicate results)
-        all_results: List[SearchResult] = []
-        seen_keys: set = set()
-        queries = [question] + (plan.queries or [])
-        for q in queries[:4]:                         # limit API/compute cost
-            for r in self.retriever.retrieve(q, k=self.retrieve_k):
-                key = (r.paper_id, r.chunk_id)
-                if key not in seen_keys:
-                    seen_keys.add(key)
-                    all_results.append(r)
-
-        # 3. Rerank
-        top_results = rerank(question, all_results, top_k=self.rerank_k)
-
-        # 4. Synthesize
-        synth = synthesize(question, top_results)
-
-        # 5. Critique
-        crit = critique(synth, question, top_results)
-
-        # 6. Evaluate
-        faith = score_faithfulness(synth, top_results)
-        cov = score_coverage(question, top_results)
-
-        return ResearchReport(
+        with logfire.span(
+            "research_agent.research",
+            agent="research_agent",
+            model=self.model_name,
             question=question,
-            plan=plan,
-            synthesis=synth,
-            critique=crit,
-            sources=top_results,
-            faithfulness_score=round(faith, 3),
-            coverage_score=round(cov, 3),
-            metadata={
-                "retrieve_k": self.retrieve_k,
-                "rerank_k": self.rerank_k,
-                "total_candidates": len(all_results),
-            },
-            created_at=datetime.utcnow(),
-        )
+        ):
+            logfire.info(
+                "ResearchAgent executing pipeline for {question} with model {model}",
+                question=question,
+                model=self.model_name,
+            )
+            agent_run_counter.add(1, {"agent": "research_agent", "model": self.model_name})
+            # 1. Plan
+            plan = plan_research(question)
+
+            # 2. Retrieve  (use all plan queries, deduplicate results)
+            all_results: List[SearchResult] = []
+            seen_keys: set = set()
+            queries = [question] + (plan.queries or [])
+            for q in queries[:4]:                         # limit API/compute cost
+                for r in self.retriever.retrieve(q, k=self.retrieve_k):
+                    key = (r.paper_id, r.chunk_id)
+                    if key not in seen_keys:
+                        seen_keys.add(key)
+                        all_results.append(r)
+
+            # 3. Rerank
+            top_results = rerank(question, all_results, top_k=self.rerank_k)
+
+            # 4. Synthesize
+            synth = synthesize(question, top_results)
+
+            # 5. Critique
+            crit = critique(synth, question, top_results)
+
+            # 6. Evaluate
+            faith = score_faithfulness(synth, top_results)
+            cov = score_coverage(question, top_results)
+
+            return ResearchReport(
+                question=question,
+                plan=plan,
+                synthesis=synth,
+                critique=crit,
+                sources=top_results,
+                faithfulness_score=round(faith, 3),
+                coverage_score=round(cov, 3),
+                metadata={
+                    "retrieve_k": self.retrieve_k,
+                    "rerank_k": self.rerank_k,
+                    "total_candidates": len(all_results),
+                    "model": self.model_name,
+                },
+                created_at=datetime.utcnow(),
+            )
 
     # ──────────────────────────────────────────────────────────
     # Convenience helpers
@@ -121,12 +137,24 @@ class ResearchAgent:
 
     def ask(self, question: str) -> str:
         """Lightweight Q&A – synthesis only (no critique / eval)."""
-        results = rerank(
-            question,
-            self.retriever.retrieve(question, k=self.retrieve_k),
-            top_k=self.rerank_k,
-        )
-        return synthesize(question, results)
+        with logfire.span(
+            "research_agent.ask",
+            agent="research_agent",
+            model=self.model_name,
+            question=question,
+        ):
+            logfire.info(
+                "ResearchAgent answering {question} with model {model}",
+                question=question,
+                model=self.model_name,
+            )
+            agent_run_counter.add(1, {"agent": "research_agent", "model": self.model_name, "action": "ask"})
+            results = rerank(
+                question,
+                self.retriever.retrieve(question, k=self.retrieve_k),
+                top_k=self.rerank_k,
+            )
+            return synthesize(question, results)
 
     def is_ready(self) -> bool:
         """True when there are indexed papers to query."""
@@ -134,3 +162,4 @@ class ResearchAgent:
 
     def stats(self) -> dict:
         return self.retriever.stats()
+

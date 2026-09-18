@@ -206,6 +206,8 @@ LAB_CATALOG: Dict[str, LabInfo] = {
     ),
 }
 
+LAB_REGISTRY = LAB_CATALOG
+
 
 def get_all_labs() -> List[LabInfo]:
     """Return all registered research laboratories."""

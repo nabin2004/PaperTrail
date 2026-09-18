@@ -32,6 +32,8 @@ from papertrail.schemas.schema import (
     CrossLabSynthesis,
 )
 from papertrail.utils.llm import get_pydantic_ai_model
+from papertrail.utils.observability import extract_model_name, agent_run_counter
+import logfire
 
 
 LEAD_SYSTEM_PROMPT = """\
@@ -90,31 +92,32 @@ def create_lead_agent(
 
     # Delegation tools registered on the lead agent
     @agent.tool_plain
-    def task_researcher(task: str) -> str:
+    async def task_researcher(task: str) -> str:
         """
         Delegate to the Researcher to formulate testable hypotheses, design experimental protocols,
         or interpret empirical outcomes.
         """
-        return _researcher.agent.run_sync(task).output
+        res = await _researcher.agent.run(task)
+        return str(res.output)
 
     @agent.tool_plain
-    def task_research_assistant(task: str) -> str:
+    async def task_research_assistant(task: str) -> str:
         """
         Delegate to the Research Assistant to compile comparative paper matrices,
         benchmark evaluations, or engineering implementation plans.
         """
-        return _assistant.run_sync(task)
+        return await _assistant.run(task)
 
     @agent.tool_plain
-    def task_research_intern(task: str) -> str:
+    async def task_research_intern(task: str) -> str:
         """
         Delegate to the Research Intern to search literature, collect & index papers,
         or check reproduction feasibility.
         """
-        return _intern.run_sync(task)
+        return await _intern.run(task)
 
     @agent.tool_plain
-    def consult_specialized_lab(lab_code: str, task: str) -> str:
+    async def consult_specialized_lab(lab_code: str, task: str) -> str:
         """
         Consult one of the 10 specialized research laboratories:
         - Core Domains: LMI, AI, VI, RCI, SIKG, GI, RLDI
@@ -122,8 +125,16 @@ def create_lead_agent(
         - Applications: AISL
         """
         from papertrail.labs.lab_agent import ResearchLabAgent
-        lab_agent = ResearchLabAgent(lab_code=lab_code, model=resolved_model)
-        return lab_agent.run_sync(task)
+        from papertrail.labs.registry import LAB_REGISTRY
+
+        cleaned_code = lab_code.strip().upper()
+        if cleaned_code not in LAB_REGISTRY:
+            return f"Error: Unknown research lab code '{lab_code}'. Valid labs: {', '.join(LAB_REGISTRY.keys())}"
+        try:
+            lab_agent = ResearchLabAgent(lab_code=cleaned_code, model=resolved_model)
+            return await lab_agent.run(task)
+        except Exception as e:
+            return f"Error consulting lab {lab_code}: {e}"
 
     return agent
 
@@ -193,6 +204,7 @@ class LeadResearcher:
 
     def __init__(self, model: Model | str | None = None) -> None:
         self.model = model
+        self.model_name = extract_model_name(model)
         self.researcher = ResearcherAgent(model=model)
         self.assistant = ResearchAssistant(model=model)
         self.intern = ResearchIntern(model=model)
@@ -219,38 +231,92 @@ class LeadResearcher:
 
     def run_sync(self, prompt: str) -> str:
         """Run the Senior Research Lead synchronously and return markdown text."""
-        result = self.agent.run_sync(prompt)
-        return str(result.output)
+        with logfire.span(
+            "lead_researcher.run_sync",
+            agent="senior_research_lead",
+            model=self.model_name,
+            prompt_preview=prompt[:80],
+        ):
+            logfire.info(
+                "Senior Research Lead running task with model {model}",
+                model=self.model_name,
+                prompt_preview=prompt[:80],
+            )
+            agent_run_counter.add(1, {"agent": "senior_research_lead", "model": self.model_name})
+            result = self.agent.run_sync(prompt)
+            return str(result.output)
 
     async def run(self, prompt: str) -> str:
         """Run the Senior Research Lead asynchronously and return markdown text."""
-        result = await self.agent.run(prompt)
-        return str(result.output)
+        with logfire.span(
+            "lead_researcher.run_async",
+            agent="senior_research_lead",
+            model=self.model_name,
+            prompt_preview=prompt[:80],
+        ):
+            logfire.info(
+                "Senior Research Lead running async task with model {model}",
+                model=self.model_name,
+                prompt_preview=prompt[:80],
+            )
+            agent_run_counter.add(1, {"agent": "senior_research_lead", "model": self.model_name})
+            result = await self.agent.run(prompt)
+            return str(result.output)
 
     def review_paper_quality(self, paper_title_or_id: str) -> PaperReviewScorecard:
         """
         Conduct a peer-review evaluation of a paper or research proposal.
         Returns a structured PaperReviewScorecard.
         """
-        prompt = (
-            f"Conduct an expert peer-review evaluation of: '{paper_title_or_id}'.\n"
-            f"Check abstract/text, evaluate soundness (1-5), novelty (1-5), empirical rigor (1-5), and clarity (1-5).\n"
-            f"Provide overall verdict, strengths, weaknesses, and actionable recommendations."
-        )
-        result = self.scorecard_agent.run_sync(prompt)
-        return result.output
+        with logfire.span(
+            "lead_researcher.review_paper_quality",
+            agent="senior_research_lead",
+            model=self.model_name,
+            paper=paper_title_or_id,
+        ):
+            logfire.info(
+                "Evaluating paper quality for {paper} with model {model}",
+                paper=paper_title_or_id,
+                model=self.model_name,
+            )
+            agent_run_counter.add(
+                1,
+                {"agent": "senior_research_lead", "model": self.model_name, "action": "review_paper_quality"},
+            )
+            prompt = (
+                f"Conduct an expert peer-review evaluation of: '{paper_title_or_id}'.\n"
+                f"Check abstract/text, evaluate soundness (1-5), novelty (1-5), empirical rigor (1-5), and clarity (1-5).\n"
+                f"Provide overall verdict, strengths, weaknesses, and actionable recommendations."
+            )
+            result = self.scorecard_agent.run_sync(prompt)
+            return result.output
 
     def plan_roadmap(self, initiative: str) -> ResearchRoadmap:
         """
         Develop a strategic multi-phase research roadmap with delegation assignments.
         """
-        prompt = (
-            f"Develop a comprehensive research roadmap for: '{initiative}'.\n"
-            f"Define strategic objectives, phased milestones, cross-domain connections, "
-            f"technical risks, and delegation responsibilities across Researcher, Assistant, and Intern."
-        )
-        result = self.roadmap_agent.run_sync(prompt)
-        return result.output
+        with logfire.span(
+            "lead_researcher.plan_roadmap",
+            agent="senior_research_lead",
+            model=self.model_name,
+            initiative=initiative,
+        ):
+            logfire.info(
+                "Planning research roadmap for {initiative} with model {model}",
+                initiative=initiative,
+                model=self.model_name,
+            )
+            agent_run_counter.add(
+                1,
+                {"agent": "senior_research_lead", "model": self.model_name, "action": "plan_roadmap"},
+            )
+            prompt = (
+                f"Develop a comprehensive research roadmap for: '{initiative}'.\n"
+                f"Define strategic objectives, phased milestones, cross-domain connections, "
+                f"technical risks, and delegation responsibilities across Researcher, Assistant, and Intern."
+            )
+            result = self.roadmap_agent.run_sync(prompt)
+            return result.output
 
     def orchestrate_campaign(self, topic: str) -> str:
         """
@@ -260,29 +326,63 @@ class LeadResearcher:
         3. Researcher: Hypothesis formulation & experiment design
         4. Lead: Strategic synthesis, methodology critique & roadmap
         """
-        prompt = (
-            f"Orchestrate a complete research campaign on: '{topic}'.\n"
-            f"1. Task the Research Intern to inspect indexed and arXiv literature.\n"
-            f"2. Task the Research Assistant to analyze comparative trade-offs and identify literature gaps.\n"
-            f"3. Task the Researcher to formulate a testable hypothesis and design an empirical experiment.\n"
-            f"4. As Lead, synthesize the final strategic direction, evaluating scientific viability and risks."
-        )
-        return self.run_sync(prompt)
+        with logfire.span(
+            "lead_researcher.orchestrate_campaign",
+            agent="senior_research_lead",
+            model=self.model_name,
+            topic=topic,
+        ):
+            logfire.info(
+                "Orchestrating full campaign on {topic} with model {model}",
+                topic=topic,
+                model=self.model_name,
+            )
+            prompt = (
+                f"Orchestrate a complete research campaign on: '{topic}'.\n"
+                f"1. Task the Research Intern to inspect indexed and arXiv literature.\n"
+                f"2. Task the Research Assistant to analyze comparative trade-offs and identify literature gaps.\n"
+                f"3. Task the Researcher to formulate a testable hypothesis and design an empirical experiment.\n"
+                f"4. As Lead, synthesize the final strategic direction, evaluating scientific viability and risks."
+            )
+            return self.run_sync(prompt)
 
     def consult_lab(self, lab_code: str, task: str) -> str:
         """
         Directly consult one of the 10 specialized research laboratories.
         """
-        from papertrail.labs.lab_agent import ResearchLabAgent
-        lab_agent = ResearchLabAgent(lab_code=lab_code, model=self.model)
-        return lab_agent.run_sync(task)
+        with logfire.span(
+            "lead_researcher.consult_lab",
+            agent="senior_research_lead",
+            model=self.model_name,
+            lab_code=lab_code,
+        ):
+            logfire.info(
+                "Lead consulting specialized lab {lab_code} with model {model}",
+                lab_code=lab_code,
+                model=self.model_name,
+            )
+            from papertrail.labs.lab_agent import ResearchLabAgent
+            lab_agent = ResearchLabAgent(lab_code=lab_code, model=self.model)
+            return lab_agent.run_sync(task)
 
     def orchestrate_matrix_collaboration(self, project: MatrixProject) -> CrossLabSynthesis:
         """
         Orchestrate a multi-lab cross-cutting matrix project across domains,
         methodologies, and applications.
         """
-        from papertrail.labs.collaboration import MatrixProjectCoordinator
-        coordinator = MatrixProjectCoordinator(model=self.model)
-        return coordinator.execute_matrix_project(project)
+        with logfire.span(
+            "lead_researcher.matrix_collaboration",
+            agent="senior_research_lead",
+            model=self.model_name,
+            project=project.project_name,
+        ):
+            logfire.info(
+                "Lead coordinating matrix collaboration for {project} with model {model}",
+                project=project.project_name,
+                model=self.model_name,
+            )
+            from papertrail.labs.collaboration import MatrixProjectCoordinator
+            coordinator = MatrixProjectCoordinator(model=self.model)
+            return coordinator.execute_matrix_project(project)
+
 

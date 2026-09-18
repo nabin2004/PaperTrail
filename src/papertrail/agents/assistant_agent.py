@@ -28,6 +28,8 @@ from papertrail.schemas.schema import (
     BenchmarkResult,
 )
 from papertrail.utils.llm import get_pydantic_ai_model
+from papertrail.utils.observability import extract_model_name, agent_run_counter
+import logfire
 
 
 ASSISTANT_SYSTEM_PROMPT = """\
@@ -168,6 +170,7 @@ class ResearchAssistant:
 
     def __init__(self, model: Model | str | None = None) -> None:
         self.model = model
+        self.model_name = extract_model_name(model)
         self.agent = create_assistant_agent(model=model)
         self._dossier_agent: Optional[Agent[None, ResearchDossier]] = None
         self._gap_agent: Optional[Agent[None, GapAnalysis]] = None
@@ -200,76 +203,179 @@ class ResearchAssistant:
 
     def run_sync(self, prompt: str) -> str:
         """Run the research assistant synchronously and return markdown text."""
-        result = self.agent.run_sync(prompt)
-        return str(result.output)
+        with logfire.span(
+            "research_assistant.run_sync",
+            agent="research_assistant",
+            model=self.model_name,
+            prompt_preview=prompt[:80],
+        ):
+            logfire.info(
+                "Research Assistant running task with model {model}",
+                model=self.model_name,
+                prompt_preview=prompt[:80],
+            )
+            agent_run_counter.add(1, {"agent": "research_assistant", "model": self.model_name})
+            result = self.agent.run_sync(prompt)
+            return str(result.output)
 
     async def run(self, prompt: str) -> str:
         """Run the research assistant asynchronously and return markdown text."""
-        result = await self.agent.run(prompt)
-        return str(result.output)
+        with logfire.span(
+            "research_assistant.run_async",
+            agent="research_assistant",
+            model=self.model_name,
+            prompt_preview=prompt[:80],
+        ):
+            logfire.info(
+                "Research Assistant running async task with model {model}",
+                model=self.model_name,
+                prompt_preview=prompt[:80],
+            )
+            agent_run_counter.add(1, {"agent": "research_assistant", "model": self.model_name})
+            result = await self.agent.run(prompt)
+            return str(result.output)
 
     def compare_papers(self, topic_or_papers: str) -> str:
         """
         Conduct an in-depth comparative analysis across papers for a given topic or paper set.
         """
-        prompt = (
-            f"Conduct a rigorous comparative analysis for: '{topic_or_papers}'.\n"
-            f"1. Search local literature and arXiv to identify the most important competing methods.\n"
-            f"2. Build a comparative breakdown: Methodology, Benchmark results, Computational efficiency, Strengths & Limitations.\n"
-            f"3. Highlight direct trade-offs between approaches."
-        )
-        return self.run_sync(prompt)
+        with logfire.span(
+            "research_assistant.compare_papers",
+            agent="research_assistant",
+            model=self.model_name,
+            topic=topic_or_papers,
+        ):
+            logfire.info(
+                "Research Assistant comparing papers for {topic} with model {model}",
+                topic=topic_or_papers,
+                model=self.model_name,
+            )
+            prompt = (
+                f"Conduct a rigorous comparative analysis for: '{topic_or_papers}'.\n"
+                f"1. Search local literature and arXiv to identify the most important competing methods.\n"
+                f"2. Build a comparative breakdown: Methodology, Benchmark results, Computational efficiency, Strengths & Limitations.\n"
+                f"3. Highlight direct trade-offs between approaches."
+            )
+            return self.run_sync(prompt)
 
     def analyze_gaps(self, topic: str) -> GapAnalysis:
         """
         Analyze current research literature and generate a structured GapAnalysis model.
         """
-        prompt = (
-            f"Analyze the research landscape for '{topic}'. Identify critical gaps, untested assumptions, "
-            f"unresolved scientific questions, and the most promising directions."
-        )
-        result = self.gap_agent.run_sync(prompt)
-        return result.output
+        with logfire.span(
+            "research_assistant.analyze_gaps",
+            agent="research_assistant",
+            model=self.model_name,
+            topic=topic,
+        ):
+            logfire.info(
+                "Research Assistant analyzing research gaps for {topic} with model {model}",
+                topic=topic,
+                model=self.model_name,
+            )
+            agent_run_counter.add(
+                1, {"agent": "research_assistant", "model": self.model_name, "action": "analyze_gaps"}
+            )
+            prompt = (
+                f"Analyze the research landscape for '{topic}'. Identify critical gaps, untested assumptions, "
+                f"unresolved scientific questions, and the most promising directions."
+            )
+            result = self.gap_agent.run_sync(prompt)
+            return result.output
 
     def prepare_dossier(self, topic: str) -> ResearchDossier:
         """
         Compile a full structured ResearchDossier for the Principal Scientist.
         """
-        prompt = (
-            f"Compile a comprehensive scientific research dossier on '{topic}'.\n"
-            f"Gather literature, extract methodology and benchmark details, perform dimensional comparisons, "
-            f"and identify research gaps."
-        )
-        result = self.dossier_agent.run_sync(prompt)
-        return result.output
+        with logfire.span(
+            "research_assistant.prepare_dossier",
+            agent="research_assistant",
+            model=self.model_name,
+            topic=topic,
+        ):
+            logfire.info(
+                "Research Assistant compiling research dossier for {topic} with model {model}",
+                topic=topic,
+                model=self.model_name,
+            )
+            agent_run_counter.add(
+                1, {"agent": "research_assistant", "model": self.model_name, "action": "prepare_dossier"}
+            )
+            prompt = (
+                f"Compile a comprehensive scientific research dossier on '{topic}'.\n"
+                f"Gather literature, extract methodology and benchmark details, perform dimensional comparisons, "
+                f"and identify research gaps."
+            )
+            result = self.dossier_agent.run_sync(prompt)
+            return result.output
 
     def run_benchmarks(self, topic_or_models: str) -> BenchmarkResult:
         """
         Compile empirical benchmark evaluations and comparative model scores for a topic or set of models.
         """
-        prompt = (
-            f"Extract empirical benchmark evaluation results for: '{topic_or_models}'.\n"
-            f"Search relevant papers to identify standardized benchmarks (e.g. GLUE, MMLU, LongBench, ImageNet),\n"
-            f"quantitative metric values across models, baseline gains, and compute requirements."
-        )
-        result = self.benchmark_agent.run_sync(prompt)
-        return result.output
+        with logfire.span(
+            "research_assistant.run_benchmarks",
+            agent="research_assistant",
+            model=self.model_name,
+            topic=topic_or_models,
+        ):
+            logfire.info(
+                "Research Assistant extracting benchmarks for {topic} with model {model}",
+                topic=topic_or_models,
+                model=self.model_name,
+            )
+            agent_run_counter.add(
+                1, {"agent": "research_assistant", "model": self.model_name, "action": "run_benchmarks"}
+            )
+            prompt = (
+                f"Extract empirical benchmark evaluation results for: '{topic_or_models}'.\n"
+                f"Search relevant papers to identify standardized benchmarks (e.g. GLUE, MMLU, LongBench, ImageNet),\n"
+                f"quantitative metric values across models, baseline gains, and compute requirements."
+            )
+            result = self.benchmark_agent.run_sync(prompt)
+            return result.output
 
     def plan_implementation(self, method_or_model: str) -> str:
         """
         Synthesize detailed implementation specs for a proposed model or method:
         architecture components, layer configurations, training objectives, and hardware footprint.
         """
-        prompt = (
-            f"Implementation Blueprint: For '{method_or_model}', generate a concrete engineering plan:\n"
-            f"1. Model architecture: Layers, normalization, activation functions, state dimensions.\n"
-            f"2. Training configuration: Loss functions, optimizers, learning rate schedule, context length.\n"
-            f"3. Infrastructure & hardware requirements: VRAM, precision (FP16/BF16), compute estimates."
-        )
-        return self.run_sync(prompt)
+        with logfire.span(
+            "research_assistant.plan_implementation",
+            agent="research_assistant",
+            model=self.model_name,
+            method=method_or_model,
+        ):
+            logfire.info(
+                "Research Assistant designing implementation plan for {method} with model {model}",
+                method=method_or_model,
+                model=self.model_name,
+            )
+            agent_run_counter.add(
+                1, {"agent": "research_assistant", "model": self.model_name, "action": "plan_implementation"}
+            )
+            prompt = (
+                f"Implementation Blueprint: For '{method_or_model}', generate a concrete engineering plan:\n"
+                f"1. Model architecture: Layers, normalization, activation functions, state dimensions.\n"
+                f"2. Training configuration: Loss functions, optimizers, learning rate schedule, context length.\n"
+                f"3. Infrastructure & hardware requirements: VRAM, precision (FP16/BF16), compute estimates."
+            )
+            return self.run_sync(prompt)
 
     def delegate_to_intern(self, request: str) -> str:
         """
         Delegate a literature search or indexing request to the junior Research Intern.
         """
-        return self.intern.run_sync(request)
+        with logfire.span(
+            "research_assistant.delegate_to_intern",
+            agent="research_assistant",
+            model=self.model_name,
+            request_preview=request[:80],
+        ):
+            logfire.info(
+                "Research Assistant delegating to intern with model {model}",
+                model=self.model_name,
+                request_preview=request[:80],
+            )
+            return self.intern.run_sync(request)
+

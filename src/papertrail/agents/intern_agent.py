@@ -23,6 +23,8 @@ from papertrail.agents.tools import (
 )
 from papertrail.schemas.schema import ResearchReport, SearchResult, ResearchPlan
 from papertrail.utils.llm import get_pydantic_ai_model
+from papertrail.utils.observability import extract_model_name, agent_run_counter
+import logfire
 
 
 INTERN_SYSTEM_PROMPT = """\
@@ -87,17 +89,42 @@ class ResearchIntern:
 
     def __init__(self, model: Model | str | None = None) -> None:
         self.model = model
+        self.model_name = extract_model_name(model)
         self.agent = create_intern_agent(model=model)
 
     def run_sync(self, prompt: str) -> str:
         """Run the research intern synchronously and return response text."""
-        result = self.agent.run_sync(prompt)
-        return str(result.output)
+        with logfire.span(
+            "research_intern.run_sync",
+            agent="research_intern",
+            model=self.model_name,
+            prompt_preview=prompt[:80],
+        ):
+            logfire.info(
+                "Research Intern running task with model {model}",
+                model=self.model_name,
+                prompt_preview=prompt[:80],
+            )
+            agent_run_counter.add(1, {"agent": "research_intern", "model": self.model_name})
+            result = self.agent.run_sync(prompt)
+            return str(result.output)
 
     async def run(self, prompt: str) -> str:
         """Run the research intern asynchronously and return response text."""
-        result = await self.agent.run(prompt)
-        return str(result.output)
+        with logfire.span(
+            "research_intern.run_async",
+            agent="research_intern",
+            model=self.model_name,
+            prompt_preview=prompt[:80],
+        ):
+            logfire.info(
+                "Research Intern running async task with model {model}",
+                model=self.model_name,
+                prompt_preview=prompt[:80],
+            )
+            agent_run_counter.add(1, {"agent": "research_intern", "model": self.model_name})
+            result = await self.agent.run(prompt)
+            return str(result.output)
 
     def investigate(self, topic: str) -> str:
         """
@@ -105,45 +132,104 @@ class ResearchIntern:
         The intern will search local literature, check arXiv if needed,
         and synthesize a comprehensive brief.
         """
-        prompt = (
-            f"Conduct a thorough research investigation on: '{topic}'.\n"
-            f"1. Check if we have relevant papers indexed locally.\n"
-            f"2. Search arXiv for relevant or recent papers on this topic.\n"
-            f"3. Highlight consensus findings, technical approaches, and open challenges.\n"
-            f"4. Provide citations for all cited works."
-        )
-        return self.run_sync(prompt)
+        with logfire.span(
+            "research_intern.investigate",
+            agent="research_intern",
+            model=self.model_name,
+            topic=topic,
+        ):
+            logfire.info(
+                "Research Intern investigating {topic} with model {model}",
+                topic=topic,
+                model=self.model_name,
+            )
+            agent_run_counter.add(
+                1, {"agent": "research_intern", "model": self.model_name, "action": "investigate"}
+            )
+            prompt = (
+                f"Conduct a thorough research investigation on: '{topic}'.\n"
+                f"1. Check if we have relevant papers indexed locally.\n"
+                f"2. Search arXiv for relevant or recent papers on this topic.\n"
+                f"3. Highlight consensus findings, technical approaches, and open challenges.\n"
+                f"4. Provide citations for all cited works."
+            )
+            return self.run_sync(prompt)
 
     def collect_data(self, topic: str, limit: int = 5) -> str:
         """
         Search and collect papers on a topic, downloading and indexing them into the repository.
         """
-        prompt = (
-            f"Data Collection Task: Search arXiv for up to {limit} key papers on '{topic}'.\n"
-            f"Download and index each promising paper that is not already in our local store.\n"
-            f"Summarize the newly collected papers with their paper IDs, titles, and key contributions."
-        )
-        return self.run_sync(prompt)
+        with logfire.span(
+            "research_intern.collect_data",
+            agent="research_intern",
+            model=self.model_name,
+            topic=topic,
+            limit=limit,
+        ):
+            logfire.info(
+                "Research Intern collecting papers for {topic} (limit={limit}) with model {model}",
+                topic=topic,
+                limit=limit,
+                model=self.model_name,
+            )
+            agent_run_counter.add(
+                1, {"agent": "research_intern", "model": self.model_name, "action": "collect_data"}
+            )
+            prompt = (
+                f"Data Collection Task: Search arXiv for up to {limit} key papers on '{topic}'.\n"
+                f"Download and index each promising paper that is not already in our local store.\n"
+                f"Summarize the newly collected papers with their paper IDs, titles, and key contributions."
+            )
+            return self.run_sync(prompt)
 
     def reproduce_study(self, paper_id_or_topic: str) -> str:
         """
         Evaluate reproduction feasibility, datasets, open-source codebases, and run setup.
         """
-        prompt = (
-            f"Reproduction Feasibility Check: Investigate '{paper_id_or_topic}'.\n"
-            f"1. Retrieve the paper abstract and methodology details.\n"
-            f"2. Identify required benchmarks, dataset splits, and hyperparameters.\n"
-            f"3. Outline step-by-step reproduction instructions and potential pitfalls."
-        )
-        return self.run_sync(prompt)
+        with logfire.span(
+            "research_intern.reproduce_study",
+            agent="research_intern",
+            model=self.model_name,
+            target=paper_id_or_topic,
+        ):
+            logfire.info(
+                "Research Intern evaluating reproduction for {target} with model {model}",
+                target=paper_id_or_topic,
+                model=self.model_name,
+            )
+            agent_run_counter.add(
+                1, {"agent": "research_intern", "model": self.model_name, "action": "reproduce_study"}
+            )
+            prompt = (
+                f"Reproduction Feasibility Check: Investigate '{paper_id_or_topic}'.\n"
+                f"1. Retrieve the paper abstract and methodology details.\n"
+                f"2. Identify required benchmarks, dataset splits, and hyperparameters.\n"
+                f"3. Outline step-by-step reproduction instructions and potential pitfalls."
+            )
+            return self.run_sync(prompt)
 
     def run_baseline_experiment(self, topic: str) -> str:
         """
         Formulate a simple exploratory baseline run to establish initial performance benchmarks.
         """
-        prompt = (
-            f"Simple Baseline Experiment: For '{topic}', identify standard baseline models\n"
-            f"and established evaluation metrics. Propose a quick-start pilot test protocol."
-        )
-        return self.run_sync(prompt)
+        with logfire.span(
+            "research_intern.run_baseline_experiment",
+            agent="research_intern",
+            model=self.model_name,
+            topic=topic,
+        ):
+            logfire.info(
+                "Research Intern planning baseline experiment for {topic} with model {model}",
+                topic=topic,
+                model=self.model_name,
+            )
+            agent_run_counter.add(
+                1, {"agent": "research_intern", "model": self.model_name, "action": "run_baseline_experiment"}
+            )
+            prompt = (
+                f"Simple Baseline Experiment: For '{topic}', identify standard baseline models\n"
+                f"and established evaluation metrics. Propose a quick-start pilot test protocol."
+            )
+            return self.run_sync(prompt)
+
 
