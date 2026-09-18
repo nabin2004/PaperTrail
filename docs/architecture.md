@@ -178,6 +178,19 @@ The LLM factory in `utils/llm.py` checks `OPENAI_API_KEY` then `OLLAMA_BASE_URL`
 
 ---
 
+## Observability & Telemetry
+
+PaperTrail features native telemetry via [Pydantic Logfire](https://logfire.pydantic.dev/), instrumenting all vertical layers:
+
+- **CLI Layer**: Tracks command execution, latency, and arguments.
+- **Agent Layer**: Traces multi-tier delegation (Lead Researcher → Researcher → Assistant → Intern → 10 Specialized Labs).
+- **Retrieval & Ingestion Layer**: Tracks FAISS vector search times, arXiv query latency, and document indexing throughput.
+- **Model Provenance**: Explicitly logs model identifiers across OpenAI, DeepSeek, and local Ollama deployments.
+
+For detailed architecture diagrams, span hierarchies, and metric catalogs, see the [Observability Guide](observability.md).
+
+---
+
 ## Scalability Notes
 
 | Bottleneck | Current | Upgrade path |

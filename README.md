@@ -295,7 +295,23 @@ pip install -e ".[dev]"
 - **PyMuPDF** – PDF text extraction
 - **Click + Rich** – CLI and terminal UI
 - **Pydantic v2** – data validation and schemas
+- **PydanticAI** – hierarchical agent execution, tool calling, and structured outputs
+- **Pydantic Logfire** – end-to-end tracing, model tracking, spans, and metrics
 - **OpenAI / Ollama** – LLM synthesis (optional)
+
+---
+
+## Observability & Tracing
+
+PaperTrail integrates [Pydantic Logfire](https://logfire.pydantic.dev/) for production-grade observability across all commands, agents, specialized labs, retrieval pipelines, and LLM calls.
+
+- **Zero configuration**: Runs out of the box with `send_to_logfire="if-token-present"`.
+- **Model Name Tracking**: Automatically records exact model names (`gpt-4o-mini`, `deepseek`, Ollama models) on all spans and metric events.
+- **Hierarchical Agent Spans**: Tracks delegation between Senior Lead, Researchers, Assistants, Interns, and 10 Research Labs.
+- **Custom Metrics**: Collects CLI command usage, agent executions, indexing throughput, and retrieval latency histograms.
+
+For full setup instructions, cloud dashboard viewing, and metric schemas, see [`docs/observability.md`](docs/observability.md).  
+For developer instructions on instrumenting new tools, agents, roles, or labs, see [`docs/logfire_developer_guide.md`](docs/logfire_developer_guide.md).
 
 ---
 
