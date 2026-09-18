@@ -6,6 +6,9 @@ PaperTrail automatically fetches papers from arXiv, builds a semantic search ind
 
 ---
 
+[roadmap forward](goals.md)
+
+
 ## Features
 
 | Capability | Description |
