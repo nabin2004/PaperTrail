@@ -96,23 +96,52 @@ All chains **gracefully degrade** when no LLM is configured:
 - Synthesis → formatted excerpt compilation  
 - Critique → heuristic word-count feedback  
 
-### 6. Agent (`src/papertrail/agents/`)
+### 6. Agent Architecture (`src/papertrail/agents/`)
 
-`ResearchAgent` orchestrates the full pipeline:
+PaperTrail implements a **4-tier academic research team** powered by **PydanticAI**. The user primarily interacts with the **Senior Research Lead**, who coordinates and delegates work across Researcher, Research Assistant, and Intern tiers. Users can also interact directly with any tier as needed. (Full details in [docs/research_team.md](research_team.md)).
 
 ```
-question
-  ├─ PlanningChain.plan_research(question)      → ResearchPlan
-  ├─ PaperRetriever.retrieve(q, k=20)           → List[SearchResult]  (per query)
-  ├─ rerank(question, all_results, top_k=6)     → List[SearchResult]
-  ├─ SynthesisChain.synthesize(question, top)   → str
-  ├─ CritiqueChain.critique(synth, ...)         → str
-  ├─ score_faithfulness(synth, top)             → float
-  ├─ score_coverage(question, top)              → float
-  └─ ResearchReport(...)
+                      ┌─────────────────────────────────┐
+                      │              USER               │
+                      └────────────────┬────────────────┘
+                                       │ (Primary interface)
+                                       ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Tier 4: Senior Researcher / Lead (LeadResearcher)                            │
+│  - Research direction, methodology validation, paper quality & peer-review   │
+│  - Cross-domain coordination, strategic research roadmaps                    │
+│  - PRIMARY ENTRY POINT: Orchestrates and delegates down to all tiers         │
+└──────────────┬───────────────────────┬───────────────────────────────┬───────┘
+               │ delegates             │ delegates                     │ delegates
+               ▼                       │                               │
+┌──────────────────────────────┐       │                               │
+│ Tier 3: Researcher           │       │                               │
+│  - Formulates hypotheses     │       │                               │
+│  - Designs experiments       │       │                               │
+│  - Interprets results        │       │                               │
+└──────────────┬───────────────┘       ▼                               │
+               │ delegates    ┌─────────────────────────────────┐      │
+               └─────────────►│ Tier 2: Research Assistant      │      │
+                              │  - Implementation & benchmarks  │      │
+                              │  - Empirical experiments        │      │
+                              │  - Comparative analysis         │      ▼
+                              └────────┬────────────────────────┤ ┌────┴────────────────────────┐
+                                       │ delegates              │ │ Tier 1: Research Intern     │
+                                       └───────────────────────►│ │  - Literature search        │
+                                                                │ │  - Data collection & PDFs   │
+                                                                │ │  - Indexing & reproduction  │
+                                                                │ │  - Simple experiments       │
+                                                                └─┴─────────────────────────────┘
 ```
 
-`tools.py` wraps agent capabilities as LangChain `BaseTool` objects for future ReAct/function-calling integration.
+| Agent | Module | CLI Command | Core Focus |
+|---|---|---|---|
+| **Senior Research Lead** | `lead_agent.py` | `papertrail lead` | Primary interface, strategic direction, peer-review quality scores, team orchestration |
+| **Researcher** | `scientist_agent.py` | `papertrail researcher` | Hypothesis formulation, experiment protocol design, result interpretation |
+| **Research Assistant** | `assistant_agent.py` | `papertrail assistant` | Comparative matrices, empirical benchmarks, implementation blueprints, gap analyses |
+| **Research Intern** | `intern_agent.py` | `papertrail intern` | Literature search, PDF downloading & indexing, reproduction feasibility |
+
+`tools.py` provides native typed functions (`search_local_papers`, `search_arxiv`, `download_and_index_paper`, `list_indexed_papers`, `get_trending_topics`, `read_paper_abstract`) for PydanticAI tool loops. Legacy LangChain wrappers remain for backward compatibility.
 
 ### 7. Evaluation (`src/papertrail/evaluation/`)
 
@@ -120,6 +149,8 @@ question
 |---|---|---|---|
 | `faithfulness.py` | 0–1 | LLM scoring prompt | Bigram overlap |
 | `coverage.py` | 0–1 | LLM scoring prompt | Keyword coverage |
+
+For an in-depth explanation of source provenance, prompt injection, and inline citation handling, see [Citation System Guide](citation_system.md).
 
 ---
 

@@ -7,7 +7,8 @@ import os
 from pathlib import Path
 from typing import List, Union
 
-import fitz  # PyMuPDF
+# import fitz  # PyMuPDF
+import pymupdf as fitz
 import requests
 
 _DATA_DIR = Path(os.getenv("DATA_DIR", "data"))

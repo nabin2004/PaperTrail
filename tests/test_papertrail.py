@@ -255,7 +255,9 @@ def test_metadata_save_load(tmp_path, monkeypatch):
 # Evaluation (heuristic only – no LLM needed)
 # ──────────────────────────────────────────────────────────────
 
-def test_faithfulness_no_llm():
+def test_faithfulness_no_llm(monkeypatch):
+    from unittest.mock import MagicMock
+    monkeypatch.setattr("papertrail.evaluation.faithfulness._llm_faithfulness", MagicMock(side_effect=RuntimeError("no LLM")))
     from papertrail.evaluation.faithfulness import score_faithfulness
     from papertrail.schemas.schema import SearchResult
 
@@ -267,7 +269,9 @@ def test_faithfulness_no_llm():
     assert 0.0 <= score <= 1.0
 
 
-def test_coverage_no_llm():
+def test_coverage_no_llm(monkeypatch):
+    from unittest.mock import MagicMock
+    monkeypatch.setattr("papertrail.evaluation.coverage._llm_coverage", MagicMock(side_effect=RuntimeError("no LLM")))
     from papertrail.evaluation.coverage import score_coverage
     from papertrail.schemas.schema import SearchResult
 
@@ -278,3 +282,4 @@ def test_coverage_no_llm():
     score = score_coverage(question, results)
     assert 0.0 <= score <= 1.0
     assert score > 0.3   # "transformers" and "attention" are present
+

@@ -61,3 +61,102 @@ class ResearchReport(BaseModel):
     coverage_score: float = 0.0
     metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ── Research Assistant Schemas ────────────────────────────────────────────────
+
+class PaperSummary(BaseModel):
+    """Structured summary of a specific paper's methodology and findings."""
+    paper_id: str = Field(description="ArXiv ID or local paper identifier")
+    title: str = Field(min_length=1, description="Paper title")
+    methodology: str = Field(description="Core methodology or algorithmic approach proposed")
+    datasets_used: List[str] = Field(default_factory=list, description="Benchmarks or datasets evaluated")
+    key_findings: List[str] = Field(default_factory=list, description="Major empirical or theoretical results")
+    strengths: List[str] = Field(default_factory=list, description="Noteworthy strengths or advantages")
+    limitations: List[str] = Field(default_factory=list, description="Stated or observed limitations")
+
+
+class PaperComparisonDimension(BaseModel):
+    """Comparative analysis along a specific technical dimension."""
+    dimension: str = Field(description="Technical dimension, e.g. 'Computational Complexity', 'Memory Footprint', 'Generalization'")
+    paper_comparisons: Dict[str, str] = Field(description="Mapping of paper_id to its approach/score on this dimension")
+    analysis: str = Field(description="Comparative synthesis and trade-off analysis across papers")
+
+
+class GapAnalysis(BaseModel):
+    """Identification of research gaps, untested assumptions, and open questions."""
+    topic: str = Field(description="Research area or topic analyzed")
+    identified_gaps: List[str] = Field(default_factory=list, description="Deficiencies, contradictions, or gaps in existing literature")
+    untested_assumptions: List[str] = Field(default_factory=list, description="Assumptions made by current works that lack rigorous verification")
+    open_questions: List[str] = Field(default_factory=list, description="Unresolved scientific or technical questions")
+    promising_directions: List[str] = Field(default_factory=list, description="Recommended research paths to address the gaps")
+
+
+class ResearchDossier(BaseModel):
+    """Comprehensive literature review and comparative dossier prepared by the Research Assistant."""
+    topic: str = Field(min_length=1, description="Research topic or domain")
+    executive_summary: str = Field(description="High-level synthesis of the state of the art")
+    taxonomy: Dict[str, List[str]] = Field(default_factory=dict, description="Taxonomy mapping paradigms/approaches to paper IDs")
+    papers_analyzed: List[PaperSummary] = Field(default_factory=list, description="Structured breakdowns of analyzed papers")
+    comparisons: List[PaperComparisonDimension] = Field(default_factory=list, description="Dimensional comparisons across the papers")
+    gap_analysis: Optional[GapAnalysis] = Field(default=None, description="Detailed gap analysis")
+    readiness_for_hypothesis: bool = Field(default=True, description="Whether the literature base is sufficiently mature for hypothesis generation")
+
+
+# ── Research Team Schemas (Lead / Researcher / Assistant / Intern) ───────────
+
+class HypothesisSpec(BaseModel):
+    """Formulation of a scientific hypothesis by the Researcher."""
+    hypothesis: str = Field(min_length=5, description="Clear, testable scientific claim")
+    theoretical_basis: str = Field(description="Underpinning theoretical rationale from literature")
+    independent_variables: List[str] = Field(default_factory=list, description="Manipulated variables or model alterations")
+    dependent_variables: List[str] = Field(default_factory=list, description="Observed outcome metrics")
+    falsification_criteria: str = Field(description="Specific empirical outcome that would disprove the hypothesis")
+    confidence_level: float = Field(default=0.8, ge=0.0, le=1.0, description="Estimated prior confidence (0.0 to 1.0)")
+
+
+class BenchmarkResult(BaseModel):
+    """Empirical benchmarking result compiled by the Research Assistant."""
+    benchmark_name: str = Field(description="Name of the benchmark or dataset")
+    task_type: str = Field(description="Task category, e.g. language modeling, retrieval, reasoning")
+    metric_name: str = Field(description="Primary metric, e.g. Accuracy, F1, Perplexity, FLOPs")
+    model_scores: Dict[str, float] = Field(default_factory=dict, description="Model or condition names mapped to scores")
+    baseline_comparison: str = Field(description="Relative gains or degradation compared to baselines")
+    compute_resources: Optional[str] = Field(default=None, description="Hardware or compute footprint notes")
+
+
+class ExperimentSpec(BaseModel):
+    """Full empirical experiment protocol designed by the Researcher and executed with the Assistant."""
+    title: str = Field(min_length=3, description="Experiment title")
+    hypothesis: HypothesisSpec = Field(description="Underlying hypothesis under test")
+    datasets: List[str] = Field(default_factory=list, description="Datasets or benchmarks targeted")
+    baselines: List[str] = Field(default_factory=list, description="Baseline models or prior approaches to beat")
+    ablation_conditions: List[str] = Field(default_factory=list, description="Ablation variants to isolate component contributions")
+    metrics: List[str] = Field(default_factory=list, description="Primary and secondary quantitative metrics")
+    expected_outcomes: str = Field(description="Expected empirical behavior if the hypothesis holds")
+    implementation_notes: str = Field(default="", description="Code/infrastructure requirements for the assistant")
+
+
+class PaperReviewScorecard(BaseModel):
+    """Quality and peer-review scorecard prepared by the Senior Researcher / Lead."""
+    paper_title: str = Field(description="Title of the evaluated paper or research proposal")
+    soundness_score: int = Field(ge=1, le=5, description="Methodological soundness (1=reject to 5=exemplary)")
+    novelty_score: int = Field(ge=1, le=5, description="Conceptual or empirical novelty (1=incremental to 5=breakthrough)")
+    empirical_rigor_score: int = Field(ge=1, le=5, description="Baselines, statistics, and benchmark fairness (1=weak to 5=exceptional)")
+    clarity_score: int = Field(ge=1, le=5, description="Presentation clarity and reproducibility (1=poor to 5=clear)")
+    overall_verdict: str = Field(description="Accept, Weak Accept, Borderline, or Reject recommendation")
+    strengths: List[str] = Field(default_factory=list, description="Core strengths of the work")
+    weaknesses: List[str] = Field(default_factory=list, description="Key deficiencies or unaddressed concerns")
+    recommendations: List[str] = Field(default_factory=list, description="Actionable recommendations for revision")
+
+
+class ResearchRoadmap(BaseModel):
+    """Strategic multi-phase research direction developed by the Senior Researcher / Lead."""
+    initiative: str = Field(description="High-level research initiative or project name")
+    strategic_objective: str = Field(description="Overarching scientific goal")
+    phases: List[Dict[str, str]] = Field(default_factory=list, description="Phased timeline: phase name -> description & deliverables")
+    cross_domain_connections: List[str] = Field(default_factory=list, description="Synergies with other AI subfields or disciplines")
+    critical_risks: List[str] = Field(default_factory=list, description="Technical or scientific risks")
+    delegation_plan: Dict[str, str] = Field(default_factory=dict, description="Assignments for Researcher, Assistant, and Intern")
+
+

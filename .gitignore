@@ -12,3 +12,9 @@ wheels/
 *.pdf
 *.txt
 *.jsonl
+
+# Generated test & local data files
+data/*
+!data/**/.gitkeep
+report.md
+.pytest_cache/

@@ -53,6 +53,14 @@ class ResearchAgent:
         self.trends = TrendMemory()
         self.retrieve_k = retrieve_k
         self.rerank_k = rerank_k
+        self._intern = None
+
+    @property
+    def intern(self):
+        if self._intern is None:
+            from papertrail.agents.intern_agent import ResearchIntern
+            self._intern = ResearchIntern()
+        return self._intern
 
     # ──────────────────────────────────────────────────────────
     # Main entry point

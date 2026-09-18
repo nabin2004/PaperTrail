@@ -44,36 +44,121 @@ cp .env.example .env
 > **No OpenAI key?**  Ingest and search work without any API key.  
 > Synthesis commands fall back to raw excerpt compilation.
 
-### 3. Ingest papers
+### 3. Discover & Ingest Papers from arXiv
+
+You can search arXiv by topic, review titles and abstracts, and select which papers to download and index:
 
 ```bash
-# Fetch 10 cs.AI + cs.LG papers, download + index them
-papertrail ingest --categories cs.AI,cs.LG --max-results 10
+# Search arXiv directly and interactively choose papers to download:
+papertrail arxiv "transformer attention mechanism"
+# (or use the alias)
+papertrail discover "diffusion models"
 
-# Ingest more papers
-papertrail ingest -c cs.CL,cs.CV -n 20
+# Search arXiv via the search command with --arxiv:
+papertrail search "transformer attention mechanism" --arxiv
+
+# Non-interactive / scripted downloads:
+papertrail arxiv "reinforcement learning from human feedback" --limit 5 --select 1,3
+papertrail arxiv "state space models mamba" --limit 5 --download-all
+
+# Batch ingest by category or topic query:
+papertrail ingest --categories cs.AI,cs.LG --max-results 10
+papertrail ingest --query "retrieval augmented generation" -n 5
 ```
 
-### 4. Search
+> **Interactive Prompt Tips:**
+> - Enter `1, 3-5` to select specific papers.
+> - Enter `all` to download and index all retrieved papers.
+> - Enter `a 1` to preview the abstract of paper #1 before deciding.
+> - Enter `q` to cancel.
+
+### 4. Search Local Papers
+
+Once papers are indexed, search through them semantically:
 
 ```bash
 papertrail search "transformer attention mechanism"
 papertrail search "diffusion models image generation" --top-k 8
 ```
 
-### 5. Ask a question
+### 5. Autonomous AI Research Team (PydanticAI)
 
+PaperTrail features a **4-tier academic research team** powered by PydanticAI. You primarily talk to the **Senior Researcher / Lead**, who delegates tasks down the hierarchy. You can also interact directly with any tier. See [docs/research_team.md](docs/research_team.md) for full details.
+
+#### 🌟 Primary Contact: Senior Research Lead (Tier 4)
+Steers research direction, reviews paper quality with peer-review rubrics, and orchestrates campaigns across the team:
 ```bash
-papertrail ask "What are the key differences between BERT and GPT architectures?"
+# General inquiry to the Lead (orchestrates team behind the scenes):
+papertrail lead "Should we pivot from pure Transformers to hybrid Mamba-Transformer models?"
+
+# End-to-end multi-tier research campaign:
+papertrail lead "State space models for genomic sequence modeling" --orchestrate
+
+# Peer-review quality assessment on a paper:
+papertrail lead "Attention Is All You Need" --review-quality
+papertrail lead "Attention Is All You Need" --review-quality --json
+
+# Strategic research roadmap:
+papertrail lead "Sub-quadratic foundation models" --roadmap
 ```
 
-### 6. Generate a full research report
+#### 🔬 Tier 3: Researcher
+Formulates testable scientific hypotheses, designs controlled empirical experiments, and interprets results against theory:
+```bash
+# Formulate testable hypothesis:
+papertrail researcher "associative recall in recurrent linear models" --hypothesis
+
+# Design controlled experiment protocol:
+papertrail researcher "Mamba outperforms Transformers on synthetic induction heads" --experiment
+
+# Interpret empirical results against theory:
+papertrail researcher "Model achieved 94.2% at 32k, but dropped to 61.5% at 64k" --interpret
+```
+
+#### 🛠️ Tier 2: Research Assistant
+Executes benchmarks, compiles comparative matrices, plans engineering implementations, and identifies literature gaps:
+```bash
+# Benchmark evaluation across models:
+papertrail assistant "Transformer vs Mamba vs RWKV" --benchmark
+
+# Side-by-side comparative literature matrix:
+papertrail assistant "Sparse Attention vs Linear Attention" --compare
+
+# Engineering implementation blueprint:
+papertrail assistant "Bidirectional selective state space block" --implement
+
+# Literature gap analysis & structured dossier:
+papertrail assistant "Sub-quadratic attention mechanisms" --gaps
+papertrail assistant "Long-context language models" --dossier
+```
+
+#### 📚 Tier 1: Research Intern
+Searches literature, downloads & indexes papers from arXiv, assesses reproduction feasibility, and runs baseline checks:
+```bash
+# Broad literature inquiry:
+papertrail intern "What papers do we have on attention, and what is missing?"
+
+# Autonomous multi-step literature review:
+papertrail intern "State space models vs transformers" --investigate
+
+# Bulk download & index papers from arXiv:
+papertrail intern "multi-modal state space models" --collect
+
+# Reproduction feasibility check:
+papertrail intern "2312.00752" --reproduce
+```
+
+### 6. Ask a question & Generate reports
 
 ```bash
+# Direct Q&A
+papertrail ask "What are the key differences between BERT and GPT architectures?"
+
+# Full research report with critique and grounding evaluations
 papertrail report "How do large language models handle long context?" --output report.md
 ```
 
-### 7. Explore trends
+### 8. Explore trends & papers
 
 ```bash
 papertrail trends
@@ -151,8 +236,10 @@ data/
 ## CLI Reference
 
 ```
-papertrail ingest   [--categories cs.AI,cs.LG] [--max-results 10]
-papertrail search   QUERY [--top-k 5] [--no-rerank]
+papertrail arxiv    [QUERY] [--limit 10] [--sort relevance] [--select 1,2] [--download-all]
+papertrail discover [QUERY] [--limit 10] [--sort relevance]
+papertrail ingest   [--categories cs.AI,cs.LG] [--query QUERY] [--max-results 10]
+papertrail search   QUERY [--top-k 5] [--rerank/--no-rerank] [--arxiv]
 papertrail ask      QUESTION [--top-k 6]
 papertrail report   QUESTION [--top-k 6] [--output report.md]
 papertrail list
